@@ -1,0 +1,6 @@
+---
+# Handlers for redis restart
+- name: restart redis
+  service:
+    name: "{{ redis_init_name }}"
+    state: restarted

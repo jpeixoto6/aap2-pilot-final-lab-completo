@@ -1,0 +1,50 @@
+---
+- hosts: automationcontroller
+  gather_facts: yes
+  vars_files: vars/collection_global_vars.yml
+  roles:
+    - role: ansible.automation_platform_installer.check_config_static
+    - role: ansible.automation_platform_installer.config_dynamic
+
+- hosts: automationcontroller
+  gather_facts: yes
+  vars_files: vars/collection_global_vars.yml
+  tasks:
+    - name: Stop Tower services on all nodes
+      command: automation-controller-service stop
+    - include_role:
+        name: ansible.automation_platform_installer.postgres
+        tasks_from: vars.yml
+    - include_role:
+        name: ansible.automation_platform_installer.config_dynamic
+    - name: Start database services on primary node if needed
+      service:
+        name: '{{ postgres_init_name }}'
+        state: started
+      when: config_dynamic_database == 'internal' and inventory_hostname == groups['automationcontroller'][0]
+
+- hosts: automationcontroller
+  gather_facts: false
+  tasks:
+
+    - name: Assign primary instance for the rekey command
+      set_fact:
+        _primary: "{{ groups['automationcontroller'][0] }}"
+
+    - name: generate a new SECRET_KEY
+      command: "awx-manage regenerate_secret_key"
+      register: new_key
+      become_user: awx
+      no_log: true
+      delegate_to: "{{ _primary }}"
+      run_once: True
+
+    - name: distribute the new SECRET_KEY to all nodes
+      copy:
+        dest: /etc/tower/SECRET_KEY
+        content: "{{ new_key.stdout }}"
+        mode: '0640'
+        backup: yes
+
+    - name: Start Tower services on all nodes
+      command: automation-controller-service start

@@ -1,0 +1,41 @@
+---
+receptor_package_name: receptor
+receptor_dependencies_list:
+  - "{{ receptor_package_name }}"
+  - receptorctl
+
+receptor_workable_dependencies:
+  - podman
+  - crun
+  - ansible-runner
+  - libcgroup-tools
+
+receptor_workable_types:
+  - control
+  - execution
+  - hybrid
+
+receptor_tls: true
+receptor_tls_reconfigure: false
+receptor_tls_dir: /etc/receptor/tls
+receptor_tls_ca_dir: "{{ receptor_tls_dir }}/ca"
+receptor_tls_bits: 4096
+receptor_tls_expiration_delta_days: 10 # assume integer will be in days
+
+receptor_tls_certfile: "{{ receptor_tls_dir }}/{{ receptor_host_identifier }}.crt"
+receptor_tls_keyfile: "{{ receptor_tls_dir }}/{{ receptor_host_identifier }}.key"
+
+# CA Mesh Nodes
+receptor_ca_common_name: "Ansible Automation Controller Nodes Mesh ROOT CA"
+receptor_ca_mesh_certfile: "{{ receptor_tls_ca_dir }}/mesh-CA.crt"
+receptor_ca_mesh_keyfile: "{{ receptor_tls_ca_dir }}/mesh-CA.key"
+
+# Keys for signing work
+receptor_work_sign_reconfigure: false
+work_sign_key_dir: /etc/receptor
+work_sign_private_keyfile: "{{ work_sign_key_dir }}/work_private_key.pem"
+work_sign_public_keyfile: "{{ work_sign_key_dir }}/work_public_key.pem"
+
+# Soft/Hard PAM limits open files
+soft_fds_limit: "{{ '4096'|int if node_type in receptor_workable_types else '1024'|int }}"
+hard_fds_limit: "{{ '8192'|int if node_type in receptor_workable_types else '2048'|int }}"

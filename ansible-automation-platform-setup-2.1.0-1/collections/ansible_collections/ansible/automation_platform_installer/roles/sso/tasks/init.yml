@@ -1,0 +1,15 @@
+---
+- name: Determine proper protocol
+  set_fact:
+    sso_protocol: "{{ sso_use_https | bool | ternary('https', 'http') }}"
+  run_once: true
+  when: sso_protocol is not defined
+
+- name: Determine proper port
+  set_fact:
+    sso_port: "{{ sso_use_https | bool | ternary(sso_https_port, sso_http_port) }}"
+  run_once: true
+  when: sso_port is not defined
+
+- set_fact:
+    sso_api_url_base: "{{ sso_protocol }}://{{ sso_host }}:{{ sso_port }}/auth"

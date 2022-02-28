@@ -1,0 +1,21 @@
+---
+# Tasks to install required packages for EL distros
+- name: Install playbook dependencies
+  yum:
+    name: '{{ el_dependencies }}'
+    state: present
+
+
+- name: Disable required dnf modules
+  shell: |
+    dnf module -y disable {{ item }}
+  args:
+    warn: false
+  with_items: "{{ dnf_modules_disable }}"
+
+- name: Enable required dnf modules
+  shell: |
+    dnf module -y reset {{ item }} && dnf module -y enable {{ item }}
+  args:
+    warn: false
+  with_items: "{{ dnf_modules }}"

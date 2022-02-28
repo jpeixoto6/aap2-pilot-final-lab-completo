@@ -1,0 +1,20 @@
+---
+# Specify the format to use when installing with the 'yum' module.
+controller_rpm: '{{ packages_el_tower_package_name }} = {{ packages_el_tower_package_version }}'
+
+# These need to be base packages only
+
+el_dependencies: []
+dnf_modules: []
+dnf_modules_disable: []
+
+packages_el_install_tower: true
+packages_el_install_postgres: false
+
+# Don't install PostgreSQL unless someone specifically asks us to
+config_dynamic_database: False
+upgrade_postgres: False
+
+# Defaults that should only apply if this role is directly executed
+packages_el_tower_package_name: automation-controller
+packages_el_tower_package_version: "{{ tower_package_version }}"

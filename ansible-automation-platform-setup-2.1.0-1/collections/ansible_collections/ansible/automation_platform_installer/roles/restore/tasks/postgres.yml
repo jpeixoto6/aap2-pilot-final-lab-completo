@@ -1,0 +1,171 @@
+---
+- block:
+  - name: controller | Dump the new controller instance topology
+    shell: |
+      pg_dump \
+        --clean --create \
+        --host='{{ controller_db_settings.default.HOST }}' \
+        --port={{ controller_db_settings.default.PORT }} \
+        --username='{{ controller_db_settings.default.USER }}' \
+        --dbname='{{ controller_db_settings.default.NAME }}' \
+        --table=main_instance \
+        --table=main_instancegroup \
+        --table=main_instancegroup_instances > new_instance_topology.db
+    args:
+      chdir: '{{ backup_dir.rstrip("/") }}/restore/'
+    environment: "{{ {'PGPASSWORD': controller_db_settings.default.PASSWORD} | combine( extra_env | default({}) ) }}"
+    no_log: True
+
+  # use dbname 'template1' to connect to the remote database
+  # Since we drop the database as part of our backup/restore, we can't use the awx
+  # database for this command.
+  - name: controller | Perform a PostgreSQL restore (external).
+    shell: |
+      psql \
+        --host='{{ controller_db_settings.default.HOST }}' \
+        --port={{ controller_db_settings.default.PORT }} \
+        --username='{{ controller_db_settings.default.USER  }}' \
+        --dbname='template1' < ./tower.db &&
+      psql \
+        --host='{{ controller_db_settings.default.HOST }}' \
+        --port={{ controller_db_settings.default.PORT }} \
+        --username='{{ controller_db_settings.default.USER  }}' \
+        --dbname='{{ controller_db_settings.default.NAME }}' < ./new_instance_topology.db
+    args:
+      chdir: '{{ backup_dir.rstrip("/") }}/restore/'
+    environment: "{{ {'PGPASSWORD': controller_db_settings.default.PASSWORD} | combine( extra_env | default({}) ) }}"
+    no_log: True
+    when: restore_database == 'external'
+
+  - name: controller | Modify database dump permissions (internal).
+    file:
+      mode: 0660
+      owner: root
+      group: postgres
+      path: '{{ backup_dir.rstrip("/") }}/restore/{{ item }}'
+    loop:
+      - tower.db
+      - new_instance_topology.db
+    when: restore_database == 'internal'
+
+  - name: controller | Perform a PostgreSQL restore (internal).
+    shell: |
+      psql \
+        --dbname='template1' < tower.db &&
+      psql \
+        --dbname='{{ controller_db_settings.default.NAME }}' < new_instance_topology.db
+    args:
+      chdir: '{{ backup_dir.rstrip("/") }}/restore/'
+    become_user: postgres
+    no_log: True
+    become: True
+    environment: '{{ extra_env | default(omit) }}'
+    when: restore_database == 'internal'
+
+  - name: controller | Modify database dump permissions (internal).
+    file:
+      mode: 0600
+      owner: root
+      group: root
+      path: '{{ backup_dir.rstrip("/") }}/restore/{{ item }}'
+    loop:
+      - tower.db
+      - new_instance_topology.db
+    when: restore_database == 'internal'
+
+  - name: controller | Copy temporary sql file
+    copy:
+      src: rebuild_ig_mapping.sql
+      dest: '{{ backup_dir.rstrip("/") }}/restore/'
+      owner: root
+      mode: 0644
+
+  - name: controller | Rebuild instance group assignments (external)
+    shell: |
+      psql \
+        --host='{{ controller_db_settings.default.HOST }}' \
+        --port={{ controller_db_settings.default.PORT }} \
+        --username='{{ controller_db_settings.default.USER  }}' \
+        --dbname='{{ controller_db_settings.default.NAME }}' < ./rebuild_ig_mapping.sql
+    args:
+      chdir: '{{ backup_dir.rstrip("/") }}/restore/'
+    environment: "{{ {'PGPASSWORD': controller_db_settings.default.PASSWORD} | combine( extra_env | default({}) ) }}"
+    no_log: True
+    when: restore_database == 'external'
+
+  - name: controller | Rebuild instance group assignments (internal)
+    shell: |
+      psql \
+        --dbname='{{ controller_db_settings.default.NAME }}' < rebuild_ig_mapping.sql
+    args:
+      chdir: '{{ backup_dir.rstrip("/") }}/restore/'
+    become_user: postgres
+    no_log: True
+    become: True
+    environment: '{{ extra_env | default(omit) }}'
+    when: restore_database == 'internal'
+
+  - name: controller | Force any running jobs in the restore into a canceled state
+    shell: 'echo -e "{{ command }}" | awx-manage shell_plus --quiet-load'
+    vars:
+      reason: 'Job in running state from restore, unable to recover'
+      command: "print('Changed jobs' if UnifiedJob.objects.filter(status='running').update(status='canceled', job_explanation='{{ reason }}') > 0 else 'No Running Jobs')"
+    register: output
+    changed_when: "'Changed jobs' in output.stdout"
+
+  - name: controller | Remove temporary sql file
+    file:
+      path: '{{ backup_dir.rstrip("/") }}/restore/rebuild_ig_mapping.sql'
+      state: absent
+
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname == groups['automationcontroller'][0]
+
+
+- block:
+
+    - name: hub | Perform a PostgreSQL restore (external).
+      shell: |
+        psql \
+          --host='{{ automationhub_db_settings.default.HOST }}' \
+          --port={{ automationhub_db_settings.default.PORT }} \
+          --username='{{ automationhub_db_settings.default.USER  }}' \
+          --dbname='template1' < ./automationhub.db
+      args:
+        chdir: '{{ backup_dir.rstrip("/") }}/restore/automationhub'
+      environment: "{{ {'PGPASSWORD': automationhub_db_settings.default.PASSWORD} | combine( extra_env | default({}) ) }}"
+      no_log: true
+      when: automationhub_restore_database == 'external'
+
+    - name: hub | Modify database dump permissions (internal).
+      file:
+        mode: 0660
+        owner: root
+        group: postgres
+        path: '{{ backup_dir.rstrip("/") }}/restore/automationhub/automationhub.db'
+      when: automationhub_restore_database == 'internal'
+
+    - name: hub | Perform a PostgreSQL restore (internal).
+      shell: |
+        psql \
+          --dbname='template1' < automationhub.db
+      args:
+        chdir: '{{ backup_dir.rstrip("/") }}/restore/automationhub'
+      become_user: postgres
+      no_log: true
+      become: true
+      environment: '{{ extra_env | default(omit) }}'
+      when: automationhub_restore_database == 'internal'
+
+    - name: hub | Modify database dump permissions (internal).
+      file:
+        mode: 0600
+        owner: root
+        group: root
+        path: '{{ backup_dir.rstrip("/") }}/restore/automationhub/automationhub.db'
+      when: automationhub_restore_database == 'internal'
+
+  when:
+    - groups['automationhub'] | default([]) | length
+    - inventory_hostname == groups['automationhub'][0]

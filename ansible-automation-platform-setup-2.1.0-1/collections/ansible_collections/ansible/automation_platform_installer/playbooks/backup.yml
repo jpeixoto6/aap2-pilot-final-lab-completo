@@ -1,0 +1,27 @@
+---
+- hosts: localhost
+  any_errors_fatal: true
+  tasks:
+    - name: Determine the timestamp for the backup once for all nodes
+      set_fact:
+        now: '{{ lookup("pipe", "date +%F-%T") }}'
+
+- hosts: automationcontroller:sso:automationhub[0]
+  any_errors_fatal: true
+  gather_facts: yes
+  vars_files: vars/collection_global_vars.yml
+  tasks:
+    - include_role:
+        name: ansible.automation_platform_installer.check_config_static
+      vars:
+        now: "{{ hostvars['localhost']['now'] }}"
+
+    - include_role:
+        name: ansible.automation_platform_installer.config_dynamic
+      vars:
+        now: "{{ hostvars['localhost']['now'] }}"
+
+    - include_role:
+        name: ansible.automation_platform_installer.backup
+      vars:
+        now: "{{ hostvars['localhost']['now'] }}"

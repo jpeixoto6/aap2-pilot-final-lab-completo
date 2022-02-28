@@ -1,0 +1,178 @@
+---
+- name: Ensure expected variables are defined
+  fail: msg="{{ item }} value missing and is required"
+  when: hostvars[inventory_hostname][item] is not defined
+  with_items: "{{ check_config_static_required_vars }}"
+
+- name: Ensure cluster hosts are not localhost
+  fail:
+    msg: "'localhost' is not allowed as a target host for cluster installs. Use the hostname or address instead (ansible_connection=local can still be used)"
+  when:
+    - groups['automationcontroller'] | default([]) | length > 1
+    - ansible_host is match("127.*") or ansible_host is match("localhost*") or ansible_host == "::1"
+
+- name: Check that group names do not conflict with instance names
+  fail: msg="Hostname '{{ ansible_host }}' conflicts with the name of a group"
+  when: ('instance_group_' + ansible_host) in groups
+
+- name: Perform inventory sanity checks
+  run_once: True
+  delegate_to: localhost
+  block:
+
+    - name: Detect pre-2.x inventory and offer a migration
+      upgrade_isolated_inventory:
+
+    - name: Detect unsupported HA inventory file
+      fail:
+        msg: 'Detected an unsupported HA inventory file, please consult the documentation and update the inventory file accordingly.'
+      when: "'primary' in groups or 'secondary' in groups"
+
+    - name: Ensure at least one automationcontroller host or one automationhub host is defined
+      fail:
+        msg: "Must specify at least one host in the automationcontroller group {{ groups['automationcontroller'] | default([]) |  length }} or in the automationhub group {{ groups['automationhub'] | default([]) | length }}"
+      when:
+        - not groups['automationcontroller'] | default([]) | length
+        - not groups['automationhub'] | default([]) | length
+
+    - name: Check that no instance groups are named automationcontroller
+      fail: msg="Cannot name instance group automationcontroller"
+      with_items: "{{ groups }}"
+      when:
+        - item != "automationcontroller"
+        - item.replace('instance_group_', '') == "automationcontroller"
+
+    - name: Ensure only one database host exists
+      fail:
+        msg: "One, and only one, database host may be specified. Database group hosts {{ groups['database'] }}"
+      when:
+        - groups['database'] | default([]) | length > 1
+
+    - name: Preflight check - Fail if Automation Hub host is localhost
+      fail:
+        msg: "The host specified in the [automationhub] group in your inventory file cannot be localhost because the resulting hub node's content URL will not be reachable by the controller node."
+      with_items: "{{ groups['automationhub'] | default([]) }}"
+      when: item is match("127.*") or item is match("localhost*") or item == "::1"
+
+    - name: Ensure hub and controller are installed on different nodes
+      fail:
+        msg: "Hub can not be installed on a controller node. Please update your inventory."
+      when:
+        - groups['automationhub'] | default([]) | length
+        - groups['automationcontroller'] | default([]) | length
+        - (groups['automationhub'][0] in groups['automationcontroller'] or hostvars[groups['automationhub'][0]]['ansible_host'] | default('') in controller_hosts_in_inventory)
+      vars:
+        controller_ansible_hosts: '{{ hostvars | dictsort | selectattr("1.ansible_host", "defined") | selectattr("0", "in", groups["automationcontroller"]) | map(attribute="1.ansible_host") | list }}'
+        controller_inventory_hostnames: '{{ hostvars | dictsort | rejectattr("1.ansible_host", "defined") | selectattr("0", "in", groups["automationcontroller"]) | map(attribute="0") | list }}'
+        controller_hosts_in_inventory: '{{ controller_ansible_hosts + controller_inventory_hostnames }}'
+
+    - name: Ensure when postgres host is defined that the port is defined
+      fail: msg="pg_host variable defined but pg_port is not defined. Please define it."
+      when: "pg_host is defined and pg_port is not defined"
+
+    - name: Ensure that when a database host is specified, that pg_host or automationhub_pg_host is defined
+      fail:
+        msg: "pg_host or automationhub_pg_host is required when hosts in the database group exist."
+      when:
+        - groups['database'] | default([]) | length
+        - ((groups['automationcontroller'] | default([]) | length and not pg_host | default('') | length) or (groups['automationhub'] | default([]) | length and not automationhub_pg_host | default('') | length))
+
+    - name: Ensure that when a database host is specified, that pg_port or automationhub_pg_port is defined
+      fail:
+        msg: "pg_port or automationhub_pg_port is required when hosts in the database group exist."
+      when:
+        - groups['database'] | default([]) | length
+        - ((groups['automationcontroller'] | default([]) | length and not pg_port | default(0) | int) or (groups['automationhub'] | default([]) | length and not automationhub_pg_port | default(0) | int))
+
+    - name: Ensure that pg_hashed_password is not set
+      fail:
+        msg: "pg_hashed_password no longer needs to be set in the inventory file.  The more secure SCRAM-SHA-256 hash will be used instead by default."
+      when: "pg_hashed_password is defined"
+
+    - name: Ensure that if we have web cert, we also have key
+      fail:
+        msg: "If you give one of web_server_ssl_cert and web_server_ssl_key, you must also give the other."
+      when: "(web_server_ssl_cert is defined and web_server_ssl_key is not defined) or (web_server_ssl_key is defined and web_server_ssl_cert is not defined)"
+
+    - name: Preflight check - verify certificates for Postgres SSL install
+      fail:
+        msg: "When installing PostgreSQL in SSL mode, postgres_ssl_cert and postgres_ssl_key must be provided."
+      when: "'database' in groups and groups['database'] and (postgres_use_ssl|default(False)|bool) and ((postgres_ssl_cert is not defined) or (postgres_ssl_key is not defined))"
+
+    - name: HA mode requires an external postgres database with pg_host defined
+      fail:
+        msg: "pg_host must be defined when multiple hosts exists"
+      when:
+        - groups['automationcontroller'] | default([]) | length > 1
+        - not pg_host | default('') | length
+
+    - name: HA mode requires an external postgres database with pg_port defined
+      fail:
+        msg: "pg_port must be defined when multiple hosts exists"
+      when:
+        - groups['automationcontroller'] | default([]) | length > 1
+        - not pg_port | default('') | length
+
+    - name: Hub HA mode requires an external postgres database with automationhub_pg_host defined
+      fail:
+        msg: "automationhub_pg_host must be defined when multiple hosts exists"
+      when:
+        - groups['automationhub'] | default([]) | length > 1
+        - not automationhub_pg_host | default('') | length
+
+    - name: Hub HA mode requires an external postgres database with automationhub_pg_port defined
+      fail:
+        msg: "automationhub_pg_port must be defined when multiple hosts exists"
+      when:
+        - groups['automationhub'] | default([]) | length > 1
+        - not automationhub_pg_port | default('') | length
+
+    - block:
+        - name: Warn if automationhub_main_url is not set in Hub HA mode and using SSO
+          fail:
+            msg: "automationhub_main_url is not defined, the first node in [automationhub] group will be used for Single Sign-On configuration."
+          ignore_errors: true
+
+        - name: Pause for warning
+          pause:
+            seconds: 5
+      when:
+        - groups['automationhub'] | default([]) | length > 1
+        - not automationhub_main_url | default('') | length
+        - groups['sso'] | default([]) | length or sso_host | default('') | length
+
+    - name: Ensure registry_username and registry_password are set for registry.redhat.io
+      fail:
+        msg: 'registry_username and registry_password must be set when registry_url is registry.redhat.io'
+      when:
+        - groups['automationcontroller'] | default([]) | length
+        - _registry_url == 'registry.redhat.io'
+        - not registry_username | default('') | length or not registry_password | default('') | length
+
+    - name: Ensure only one SSO host exists
+      fail:
+        msg: "One, and only one, SSO host may be specified. SSO group hosts {{ groups['sso'] }}"
+      when:
+        - groups['sso'] | default([]) | length > 1
+
+    - name: Ensure sso_host is not defined when setting up a new SSO node
+      fail:
+        msg: 'sso_host must not be set when setting up a new SSO node'
+      when:
+        - groups['sso'] | default([]) | length
+        - sso_host | default('') | length
+
+    - name: Ensure password is set for SSO
+      fail:
+        msg: 'sso_console_admin_password must be set'
+      when:
+        - groups['sso'] | default([]) | length or sso_host | default('') | length
+        - not sso_console_admin_password | default('') | length
+
+    - name: Ensure sso_keystore_password is set when enabling SSL for SSO
+      fail:
+        msg: "sso_keystore_password (minimum 6 characters) must be set when installing Single Sign-On with SSL support"
+      when:
+        - groups['sso'] | default([]) | length
+        - sso_use_https | default(True) | bool
+        - sso_keystore_password | default('') | length < 6

@@ -1,0 +1,159 @@
+---
+- name: Create or update {{ sso_client_id }} client
+  keycloak_client:
+    auth_client_id: admin-cli
+    auth_keycloak_url: '{{ sso_api_url_base }}'
+    auth_realm: master
+    auth_username: '{{ sso_console_admin_username }}'
+    auth_password: '{{ sso_console_admin_password }}'
+    name: '{{ sso_client_name }}'
+    client_id: '{{ sso_client_id }}'
+    description: 'Client for {{ sso_client_name }}'
+    realm: '{{ sso_automation_platform_realm }}'
+    attributes:
+      user.info.response.signature.alg: RS256
+      request.object.signature.alg: RS256
+    client_authenticator_type: client-secret
+    direct_access_grants_enabled: '{{ sso_client_direct_access_enabled }}'
+    protocol: openid-connect
+    protocol_mappers:
+      - config:
+          access.token.claim: "true"
+          claim.name: "family_name"
+          id.token.claim: "true"
+          jsonType.label: String
+          user.attribute: lastName
+          userinfo.token.claim: "true"
+        consentRequired: false
+        name: family name
+        protocol: openid-connect
+        protocolMapper: oidc-usermodel-property-mapper
+      - config:
+          userinfo.token.claim: "true"
+          user.attribute: email
+          id.token.claim: true
+          access.token.claim: "true"
+          claim.name: email
+          jsonType.label: String
+        name: email
+        protocol: openid-connect
+        protocolMapper: oidc-usermodel-property-mapper
+        consentRequired: false
+      - config:
+          multivalued: "true"
+          access.token.claim: "true"
+          claim.name: "resource_access.${client_id}.roles"
+          jsonType.label: String
+        name: client roles
+        protocol: openid-connect
+        protocolMapper: oidc-usermodel-client-role-mapper
+        consentRequired: false
+      - config:
+          userinfo.token.claim: "true"
+          user.attribute: firstName
+          id.token.claim: "true"
+          access.token.claim: "true"
+          claim.name: given_name
+          jsonType.label: String
+        name: given name
+        protocol: openid-connect
+        protocolMapper: oidc-usermodel-property-mapper
+        consentRequired: false
+      - config:
+          id.token.claim: "true"
+          access.token.claim: "true"
+          userinfo.token.claim: "true"
+        name: full name
+        protocol: openid-connect
+        protocolMapper: oidc-full-name-mapper
+        consentRequired: false
+      - config:
+          userinfo.token.claim: "true"
+          user.attribute: username
+          id.token.claim: "true"
+          access.token.claim: "true"
+          claim.name: preferred_username
+          jsonType.label: String
+        name: username
+        protocol: openid-connect
+        protocolMapper: oidc-usermodel-property-mapper
+        consentRequired: false
+      - config:
+          access.token.claim: "true"
+          claim.name: "group"
+          full.path: "true"
+          id.token.claim: "true"
+          userinfo.token.claim: "true"
+        consentRequired: false
+        name: group
+        protocol: openid-connect
+        protocolMapper: oidc-group-membership-mapper
+      - config:
+          multivalued: 'true'
+          id.token.claim: 'true'
+          access.token.claim: 'true'
+          userinfo.token.claim: 'true'
+          usermodel.clientRoleMapping.clientId:  '{{ sso_client_id }}'
+          claim.name: client_roles
+          jsonType.label: String
+        name: client_roles
+        protocolMapper: oidc-usermodel-client-role-mapper
+        protocol: openid-connect
+      - config:
+          id.token.claim: true
+          access.token.claim: true
+          included.client.audience: '{{ sso_client_id }}'
+        protocol: openid-connect
+        name: audience mapper
+        protocolMapper: oidc-audience-mapper
+    public_client: no
+    redirect_uris:
+      - '{{ sso_client_redirect_uri }}'
+    secret: '{{ sso_client_secret | default(omit) }}'
+    state: present
+    validate_certs: false
+    web_origins:
+      - '{{ sso_client_web_origins }}'
+  no_log: true
+
+- name: Create a client role
+  keycloak_role:
+    auth_client_id: admin-cli
+    auth_keycloak_url: '{{ sso_api_url_base }}'
+    auth_realm: master
+    auth_username: '{{ sso_console_admin_username }}'
+    auth_password: '{{ sso_console_admin_password }}'
+    name: '{{ sso_client_admin_role }}'
+    description: 'An administrator role for {{ sso_client_name }}'
+    realm: '{{ sso_automation_platform_realm }}'
+    client_id: '{{ sso_client_id }}'
+    state: present
+    validate_certs: false
+  no_log: true
+
+- name: Get {{ sso_client_id }} client info
+  uri:
+    url: "{{ sso_api_url_base }}/admin/realms/{{ sso_automation_platform_realm }}/clients?clientId={{ sso_client_id }}"
+    method: GET
+    headers:
+      Authorization: 'Bearer {{ sso_token }}'
+    validate_certs: false
+  no_log: true
+  register: sso_get_client
+
+- set_fact:
+    client_uuid: '{{ sso_get_client.json[0].id }}'
+
+- name: Get {{ sso_client_id }} client secret
+  uri:
+    url: "{{ sso_api_url_base }}/admin/realms/{{ sso_automation_platform_realm }}/clients/{{ client_uuid }}/client-secret"
+    method: GET
+    headers:
+      Authorization: 'Bearer {{ sso_token }}'
+    validate_certs: false
+  no_log: true
+  register: sso_get_client_secret
+
+- set_fact:
+    sso_client_secret: '{{ sso_get_client_secret.json.value }}'
+  no_log: true

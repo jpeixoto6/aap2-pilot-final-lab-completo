@@ -1,0 +1,72 @@
+---
+- name: Run preflight checks
+  include_tasks: preflight.yml
+
+- name: Set the servicescatalog_controller_hostname value from variable if specified
+  set_fact:
+    _servicescatalog_controller_hostname: "{{ servicescatalog_controller_hostname | regex_replace('^http(s)?://(?P<hostname>[^/]*)(/.*)?$', '\\g<hostname>') }}"
+  when: servicescatalog_controller_hostname | default('') | length
+
+- name: Set the servicescatalog_controller_hostname value from inventory
+  set_fact:
+    _servicescatalog_controller_hostname: "{{ hostvars[groups['automationcontroller'][0]]['ansible_host'] | default(hostvars[groups['automationcontroller'][0]]['inventory_hostname']) }}"
+  when: not servicescatalog_controller_hostname | default('') | length
+
+- name: Generate token for catalog worker auth
+  include_tasks: generate_token.yml
+
+- name: Install catalog worker
+  become: true
+  dnf:
+    name: "rhc-catalog-worker"
+
+- name: Remove unwanted packages
+  become: true
+  dnf:
+    name: "{{ unwanted_worker_packages }}"
+    state: absent
+
+- name: Ensure service config directory exists
+  become: true
+  file:
+    path: "{{ rhc_service_config_dir }}"
+    recurse: true
+    state: directory
+
+- name: Write rhc service proxy configuration file
+  become: true
+  template:
+    dest: "{{ rhc_service_config_dir }}/proxy.conf"
+    mode: 0640
+    src: proxy.conf.j2
+
+- name: Ensure config directory exists
+  become: true
+  file:
+    path: "{{ catalog_config_dir }}"
+    recurse: true
+    state: directory
+
+- name: Write Catalog Worker config file
+  become: true
+  template:
+    dest: "{{ catalog_config_dir }}/catalog.toml"
+    mode: 0640
+    src: catalog.toml.j2
+  notify: restart-rhcd
+  when: _servicescatalog_controller_token != '************'
+
+- name: Optionally write RHCD config file
+  become: true
+  template:
+    dest: "{{ rhc_config_dir }}/config.toml"
+    mode: 0640
+    src: config.toml.j2
+  notify: restart-rhcd
+
+- name: Start the rhcd systemd service
+  become: true
+  systemd:
+    unit: rhcd
+    enabled: true
+    state: started

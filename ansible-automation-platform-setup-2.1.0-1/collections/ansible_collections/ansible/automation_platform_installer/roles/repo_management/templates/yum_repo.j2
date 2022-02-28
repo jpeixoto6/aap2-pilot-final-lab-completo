@@ -1,0 +1,15 @@
+[automation-controller]
+name=Automation Controller Repository - $releasever $basearch
+baseurl={{ aw_repo_url }}/rpm/epel-{{ ansible_distribution_major_version }}-$basearch
+enabled=0
+gpgcheck={{ gpgcheck }}
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+priority=1
+
+[ansible-automation-platform]
+name=Ansible Automation Platform Repository - $releasever $basearch
+baseurl={{ aw_repo_url }}/rpm/dependencies/{{ tower_package_version[:3] }}/epel-{{ ansible_distribution_major_version }}-$basearch
+enabled=0
+gpgcheck={{ gpgcheck }}
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+module_hotfixes=1

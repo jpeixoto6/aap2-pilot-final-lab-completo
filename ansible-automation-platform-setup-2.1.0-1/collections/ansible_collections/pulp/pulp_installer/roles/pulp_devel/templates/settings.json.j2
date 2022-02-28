@@ -1,0 +1,35 @@
+{
+  "hosts": [
+    {
+      "hostname": "{{ ansible_facts.fqdn }}",
+      "roles": {
+        "api": {
+          "port": {{ pulp_webserver_disable_https | default(false) | ternary(80, 443) }},
+          "scheme": "{{ pulp_webserver_disable_https | default(false) | ternary('http', 'https') }}",
+          "service": "nginx",
+          "verify": false
+        },
+        "content": {
+          "port": {{ pulp_webserver_disable_https | default(false) | ternary(80, 443) }},
+          "scheme": "{{ pulp_webserver_disable_https | default(false) | ternary('http', 'https') }}",
+          "service": "pulpcore-content",
+          "verify": false
+        },
+        "pulp resource manager": {},
+        "pulp workers": {},
+        "redis": {},
+        "shell": {
+          "transport": "local"
+        }
+      }
+    }
+  ],
+  "pulp": {
+    "auth": [
+      "admin",
+      "{{ pulp_default_admin_password | default('password') }}"
+    ],
+    "selinux enabled": false,
+    "version": "3"
+  }
+}

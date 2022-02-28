@@ -1,0 +1,8 @@
+[ansible-automation-platform]
+name=Ansible Automation Platform Offline Repository $releasever $basearch
+baseurl=file://{{ bundle_install_folder }}
+enabled=0
+gpgcheck={{ gpgcheck }}
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+cost=10
+module_hotfixes=1

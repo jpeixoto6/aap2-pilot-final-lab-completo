@@ -1,0 +1,89 @@
+---
+- name: Copy custom node SSL files
+  become: yes
+  become_user: receptor
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: 0640
+    owner: receptor
+    group: receptor
+  with_items:
+    - { src: '{{ mesh_node_certfile }}', dest: '{{ receptor_tls_certfile }}' }
+    - { src: '{{ mesh_node_keyfile }}', dest: '{{ receptor_tls_keyfile }}' }
+  when:
+    - mesh_node_certfile | default('') | length
+    - mesh_node_keyfile | default('') | length
+
+- name: Verify if Mesh Nodes certificate exists
+  stat:
+    path: "{{ item }}"
+  register: _mesh_node_crt
+  failed_when: not _mesh_node_crt.stat.exists
+  ignore_errors: yes
+  with_items:
+    - "{{ receptor_tls_certfile }}"
+    - "{{ receptor_tls_keyfile }}"
+
+- name: Obtain all ipv4_addresses from node
+  set_fact:
+    receptor_ipaddress_cmd: "ipaddress={{ hostvars[inventory_hostname]['ansible_all_ipv4_addresses'] | join(' ipaddress=') }}"
+
+- name: Validate if receptor_host_identifier is an ipaddress
+  set_fact:
+    _dnsname_valid_ipadddr: "{{ receptor_host_identifier | regex_search(regexp) }}"
+  vars:
+    regexp: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$"
+
+- name: Include the iPAddress x509 extension on the receptor certificate when receptor_host_identifier is an IP address and is not assigned to any NIC at the node
+  set_fact:
+    receptor_ipaddress_cmd: "ipaddress={{ receptor_host_identifier }}"
+  when: ( _dnsname_valid_ipadddr != None and _dnsname_valid_ipadddr|length > 0)  and ( receptor_host_identifier not in receptor_ipaddress_cmd )
+
+- name: Adds dnsname option to the receptor certificate
+  set_fact:
+    x509_dnsname_cmd: "dnsname={{ receptor_host_identifier }}"
+  when: _dnsname_valid_ipadddr == '' or _dnsname_valid_ipadddr == None
+
+- name: Create Mesh node certificate
+  become: yes
+  become_user: receptor
+  register: receptor_tls_csr_pending
+  shell: >
+    receptor --cert-makereq commonname="{{ receptor_host_identifier }}"
+    bits="{{ receptor_tls_bits }}"
+    nodeid="{{ (receptor_host_identifier == 'localhost') | ternary('localhost.localdomain', receptor_host_identifier) }}"
+    outreq="{{ receptor_tls_dir }}/{{ receptor_host_identifier }}.csr"
+    outkey="{{ receptor_tls_keyfile }}"
+    {{ receptor_ipaddress_cmd | default(None) }}
+    {{ x509_dnsname_cmd | default('') }}
+  when: _mesh_node_crt is failed
+  notify:
+    - "Restart Receptor"
+
+- name: Adjust Mesh Node private key permission
+  file:
+    dest: "{{ receptor_tls_keyfile }}"
+    owner: receptor
+    group: receptor
+    mode: 0640
+
+- name: Slurp Mesh Node CSR
+  slurp:
+    src: "{{ receptor_tls_dir }}/{{ receptor_host_identifier }}.csr"
+  register: receptor_tls_csr
+  no_log: true
+  when: receptor_tls_csr_pending is changed
+
+- name: Transfer Receptor Mesh Node CSR to be signed
+  delegate_to: "{{ groups['automationcontroller'][0] }}"
+  no_log: true
+  copy:
+    content: "{{ hostvars[inventory_hostname]['receptor_tls_csr']['content'] | b64decode }}"
+    dest: "{{ hostvars[inventory_hostname]['receptor_tls_csr']['source'] }}"
+    mode: 0640
+    owner: receptor
+    group: receptor
+  when:
+    - receptor_tls_csr | default([]) | length
+    - receptor_tls_csr_pending is changed

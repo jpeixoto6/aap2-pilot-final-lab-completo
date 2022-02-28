@@ -1,0 +1,20 @@
+---
+pulp_preq_packages:
+  # pip module doc: "The interpreter used by Ansible (see ansible_python_interpreter) requires the
+  # setuptools package, regardless of the version of pip set with the executable option."
+  - python-setuptools
+  - rh-python38-python
+  - rh-python38-python-devel
+  - rh-python38-python-setuptools
+  - libselinux-python  # For ansible itself
+  - policycoreutils-python  # For ansible itself
+  - rh-postgresql10-postgresql-devel
+  - gcc                # For psycopg2
+  - make               # For make docs, and SELinux policy install
+  - git                # For source install, and SELinux policy install
+  - sudo
+  - gnupg2             # For the signing service via the gpg python module
+
+pulp_python_interpreter: '/opt/rh/rh-python38/root/usr/bin/python3.8'
+pulp_python_cryptography:
+  - python-cryptography

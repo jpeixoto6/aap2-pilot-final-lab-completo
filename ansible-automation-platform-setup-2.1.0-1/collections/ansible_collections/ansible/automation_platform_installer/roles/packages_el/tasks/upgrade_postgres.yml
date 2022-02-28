@@ -1,0 +1,41 @@
+---
+- name: Stop PostgreSQL 10
+  service:
+    name: '{{ pg_systemd_name }}'
+    state: stopped
+    enabled: false
+
+- name: Reset PostgreSQL module
+  shell: |
+    dnf module -y reset 'postgresql'
+  args:
+    warn: false
+
+- name: Enable PostgreSQL 12 dnf modules
+  shell: |
+    dnf module -y enable 'postgresql:12'
+  args:
+    warn: false
+
+- name: Install PostgreSQL 12
+  dnf:
+    name: '{{ item }}'
+    state: present
+  loop:
+    - '@postgresql:12'
+    - postgresql-upgrade
+
+- name: Upgrade to PostgreSQL 12
+  command: /bin/postgresql-setup --upgrade --upgrade-from=postgresql
+
+- name: Uninstall postgresql-upgrade package
+  dnf:
+    name: postgresql-upgrade
+    state: absent
+
+- include_tasks: install_deps.yml
+
+- name: Create file to signify PostgreSQL has been upgraded
+  file:
+    path: "{{ existing_pg_dir }}/PG_VERSION.upgraded12"
+    state: touch

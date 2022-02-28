@@ -1,0 +1,96 @@
+---
+- name: Add ansible-runner cgroup config
+  blockinfile:
+    path: /etc/cgconfig.conf
+    owner: root
+    group: root
+    mode: 0644
+    create: yes
+    insertafter: EOF
+    marker: "# <!-- {mark} ansible-runner cgroup -->"
+    block: |
+      group ansible-runner {
+        perm {
+          admin {
+            uid = {{ run_podman_as }};
+            gid = {{ run_podman_as }};
+          }
+
+          task {
+            uid = {{ run_podman_as }};
+            gid = {{ run_podman_as }};
+          }
+        }
+
+        cpuacct { }
+        memory { }
+        pids { }
+      }
+  become: true
+
+- name: Enable, start cgconfig service
+  service:
+    name: cgconfig
+    state: restarted
+    enabled: true
+  become: true
+
+- name: Allocate subuids for {{ run_podman_as }} user
+  subuid:
+    user: "{{ run_podman_as }}"
+  become: true
+  register: subuids
+
+- name: Allocate subgids for {{ run_podman_as }} user
+  subgid:
+    group: "{{ run_podman_as }}"
+  become: true
+  register: subgids
+
+- name: Create directory for crun runtime config
+  file:
+    path: /var/lib/{{ run_podman_as }}/.config/containers
+    state: directory
+    mode: 0700
+    owner: "{{ run_podman_as }}"
+    group: "{{ run_podman_as }}"
+    recurse: yes
+
+- name: Configure podman default runtime
+  copy:
+    content: |
+      [engine]
+      runtime = "{{ default_runtime }}"
+    dest: "/var/lib/{{ run_podman_as }}/.config/containers/containers.conf"
+    owner: "{{ run_podman_as }}"
+    group: "{{ run_podman_as }}"
+    mode: 0600
+
+- name: Create empty mounts config file to avoid permissions error message
+  copy:
+    content: ""
+    dest: "/var/lib/{{ run_podman_as }}/.config/containers/mounts.conf"
+    force: false
+    owner: "{{ run_podman_as }}"
+    group: "{{ run_podman_as }}"
+    mode: 0600
+
+- name: Ensure registries.conf.d exists
+  file:
+    path: /etc/containers/registries.conf.d/
+    state: directory
+    recurse: true
+    mode: 0755
+
+- name: Force fully qualified image names to be provided to podman pull
+  copy:
+    content: |
+      unqualified-search-registries = []
+    dest: /etc/containers/registries.conf.d/force-fully-qualified-images.conf
+    mode: 0644
+
+- name: Ensure changes are applied to podman
+  command: podman system migrate
+  when: subuids is changed or subgids is changed
+  become: yes
+  become_user: "{{ run_podman_as }}"

@@ -1,0 +1,35 @@
+- name: Enable base controller firewall ports
+  lineinfile:
+    dest: /etc/sysconfig/iptables
+    state: present
+    regexp: "^.*INPUT.*tcp.*{{item}}.*ACCEPT"
+    insertafter: "^:OUTPUT "
+    line: "-A INPUT -p tcp --dport {{item}} -j ACCEPT"
+  when: inventory_hostname in groups['automationcontroller'] | default([])
+  with_items: "{{ controller_firewall_ports }}"
+  notify: restart iptables
+
+- name: Enable standalone database firewall ports
+  lineinfile:
+    dest: /etc/sysconfig/iptables
+    state: present
+    regexp: "^.*INPUT.*tcp.*{{item}}.*ACCEPT"
+    insertafter: "^:OUTPUT "
+    line: "-A INPUT -p tcp --dport {{item}} -j ACCEPT"
+  when: inventory_hostname in groups['database'] | default([])
+  with_items: "{{ database_firewall_ports }}"
+  notify: restart iptables
+
+- name: Enable execution nodes firewall ports
+  lineinfile:
+    dest: /etc/sysconfig/iptables
+    state: present
+    regexp: "^.*INPUT.*{{receptor_listener_protocol}}.*{{item}}.*ACCEPT"
+    insertafter: "^:OUTPUT "
+    line: "-A INPUT -p {{receptor_listener_protocol}} --dport {{item}} -j ACCEPT"
+  when: >
+    listener | default(False) | bool and
+    (inventory_hostname in groups['execution_nodes'] | default([]) or
+     inventory_hostname in groups['automationcontroller'] | default([]))
+  with_items: "{{ receptor_firewall_ports }}"
+  notify: restart iptables

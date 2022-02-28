@@ -1,0 +1,45 @@
+---
+- name: Check for old PostgreSQL data
+  stat:
+    path: "{{ existing_pg_dir }}/PG_VERSION"
+  register: old_pg_version_file
+
+- name: Read PG_VERSION file contents
+  command: "cat {{ existing_pg_dir }}/PG_VERSION"
+  register: old_pg_version_file_content
+  when: old_pg_version_file.stat.exists
+
+- name: Check if PostgreSQL has already been upgraded
+  stat:
+    path: "{{ existing_pg_dir }}/PG_VERSION.upgraded12"
+  register: pg_already_upgraded
+
+- name: Determine if we should upgrade PostgreSQL
+  set_fact:
+    upgrade_postgres: >-
+      {{ (old_pg_version_file.stat.exists and
+          ((old_pg_version_file_content.stdout | trim | int) != 12) and
+          (not pg_already_upgraded.stat.exists) | bool) }}
+
+- block:
+    - name: Uninstall PostgreSQL 10 Client
+      shell: |
+        dnf module -y reset 'postgresql'
+      args:
+        warn: false
+
+    - name: Enable PostgreSQL 12 dnf modules
+      shell: |
+        dnf module -y enable 'postgresql:12'
+      args:
+        warn: false
+
+    - name: Install PostgreSQL
+      dnf:
+        name: '@postgresql:12/server'
+        state: present
+  when: not upgrade_postgres | bool
+
+- name: Upgrade PostgreSQL
+  include_tasks: upgrade_postgres.yml
+  when: upgrade_postgres | bool

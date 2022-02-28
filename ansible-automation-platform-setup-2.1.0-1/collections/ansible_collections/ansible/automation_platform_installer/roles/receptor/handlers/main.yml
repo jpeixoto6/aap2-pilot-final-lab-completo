@@ -1,0 +1,19 @@
+---
+# Handlers for common notifications.
+
+- name: Reload Receptor
+  shell: receptorctl --socket {{ receptor_socket_dir }}/{{ control_filename }} reload
+  become: yes
+  become_user: "{{ run_receptor_as }}"
+  register: _reload
+  listen: "Receptor Reload Type"
+  ignore_errors: true
+  failed_when: _reload.rc != 0 or _reload.stdout.startswith("Error:")
+
+- name: Restart Receptor
+  systemd:
+    name: receptor
+    state: restarted
+    enabled: yes
+  listen: "Receptor Reload Type"
+  when: _reload is not defined or _reload.failed|bool

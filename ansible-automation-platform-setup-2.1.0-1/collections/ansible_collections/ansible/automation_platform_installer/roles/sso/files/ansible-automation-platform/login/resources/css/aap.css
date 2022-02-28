@@ -1,0 +1,15 @@
+.login-pf body {
+    background: url(../img/Logo.png) no-repeat center center fixed;
+    background-color: black;
+    background-position: left 30px top 30px;
+    background-size: 50%;
+    height: 100%;
+}
+
+#kc-header-wrapper {
+    visibility: hidden;
+}
+
+.login-pf-page .login-pf-page-header {
+    margin-bottom: 200px;
+}

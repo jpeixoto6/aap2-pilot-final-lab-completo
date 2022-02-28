@@ -1,0 +1,32 @@
+---
+- name: Create OpenStack Instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    guid: "{{ lookup('env','GUID') }}"
+  tasks:
+    - name: Include Instance variables
+      include_vars: instances_vars.yml
+
+    - name: Create Instance
+      openstack.cloud.server:
+        cloud: "{{ guid }}-project"
+        name: "{{ instance.name }}"
+        image: "{{ instance.image }}"
+        key_name: "{{ instance.keypair }}"
+        flavor: "{{ instance.flavor }}"
+        security_groups: "{{ instance.security_group }}"
+        auto_ip: no
+        wait: yes
+        nics:
+          - net-name: "{{ instance.internal_network }}"
+        meta: "AnsibleGroup={{instance.metadata.AnsibleGroup}},deployment_name={{instance.metadata.deployment_name}}"
+        userdata: |
+          #!/bin/bash
+          echo 'PEERDNS=no' |sudo  tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 >/dev/null
+          sudo systemctl restart NetworkManager
+        state: present
+      loop: "{{ instances }}"
+      loop_control:
+        loop_var: instance

@@ -1,0 +1,23 @@
+---
+- name: Check if the system is registered with RHSM
+  stat:
+    path: "{{ system_cert_file }}"
+  register: cert_details
+
+- name: Fail if the certificate is missing
+  ansible.builtin.fail:
+    msg: "{{ system_cert_file }} missing, please register the system with RHSM"
+  when: not cert_details.stat.exists
+
+- name: Verify that the servicescatalog_controller_hostname is specified or that the inventory is proper
+  assert:
+    that:
+      - servicescatalog_controller_hostname | default('') | length or groups['automationcontroller'] | length
+    fail_msg: Ensure that either servicescatalog_controller_hostname is specified or there is a host in the automationcontroller group
+
+- name: Verify that the required parameters are provided
+  assert:
+    that:
+      - servicescatalog_controller_user | default('') | length
+      - servicescatalog_controller_password | default('') | length
+    fail_msg: Ensure both servicescatalog_controller_user and servicescatalog_controller_password are defined and have proper values

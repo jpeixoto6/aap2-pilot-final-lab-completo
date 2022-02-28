@@ -1,0 +1,6 @@
+---
+backup_dir: /var/backups/automation-platform/
+restore_database: 'internal'
+pg_database: awx
+restore_backup_file: '{{ lookup("env", "PWD") }}/automation-platform-backup-latest.tar.gz'
+restore_file_prefix: "automation-platform-restore"

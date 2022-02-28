@@ -1,0 +1,11 @@
+---
+tower_package_name: 'automation-controller'
+tower_package_version: '4.1.0'
+
+automationhub_package_name: 'automation-hub'
+automationhub_package_version: '4.4.0'
+
+automation_platform_version: '2.1.0'
+automation_platform_channel: ansible-automation-platform-2.1-for-rhel-8-x86_64-rpms
+
+minimum_ansible_version: '2.11'

@@ -1,0 +1,110 @@
+---
+- node:
+    id: {{ (receptor_host_identifier == 'localhost') | ternary('localhost.localdomain', receptor_host_identifier) }}
+{% if node_type == 'control' or node_type == 'hybrid' %}
+    firewallrules:
+      - action: "reject"
+        tonode: "{{ (receptor_host_identifier == 'localhost') | ternary('localhost.localdomain', receptor_host_identifier) }}"
+        toservice: "control"
+{% endif %}
+
+{% if node_type == 'control' or node_type == 'hybrid' %}
+- work-signing:
+    privatekey: {{ work_sign_private_keyfile }}
+    tokenexpiration: 1m
+{% endif %}
+
+{% if node_type == 'control' or node_type == 'execution' or node_type == 'hybrid'  %}
+- work-verification:
+    publickey: {{ work_sign_public_keyfile }}
+{% endif %}
+
+
+# Log Level
+- log-level: {{ log_level }}
+
+# Control Service
+- control-service:
+    service: {{ control_service_name }}
+    filename: {{ receptor_socket_dir }}/{{ control_filename }}
+    permissions: 0660
+    {% if receptor_tls|bool -%}
+    tls: tls_server
+    {% endif %}
+
+{% if receptor_tls|bool -%}
+# TLS
+- tls-server:
+    name: tls_server
+    cert: {{ receptor_tls_certfile }}
+    key: {{ receptor_tls_keyfile }}
+    clientcas: {{ receptor_ca_mesh_certfile }}
+    requireclientcert: true
+
+- tls-client:
+    name: tls_client
+    cert: {{ receptor_tls_certfile }}
+    key: {{ receptor_tls_keyfile }}
+    rootcas: {{ receptor_ca_mesh_certfile }}
+    insecureskipverify: false
+{% endif %}
+
+{% if listener|bool %}
+# Listener
+- {{ listener_protocol }}-listener:
+    port: {{ listener_port }}
+    {% if receptor_tls|bool -%}
+    tls: tls_server
+    {% endif %}
+{% elif groups['automationcontroller'] | length == 1 %}
+# Listener (single node)
+- local-only
+{% endif %}
+
+# Peers
+{% if mesh[inventory_hostname]['peers'] | length %}
+{% for peer in mesh[inventory_hostname]['peers'] %}
+- {{ hostvars[peer]['listener_protocol'] }}-peer:
+    address: {{ hostvars[peer]['receptor_host_identifier'] }}:{{ hostvars[peer]['listener_port'] }}
+    redial: true
+{% if receptor_tls|bool %}
+    tls: tls_client
+{% endif %}
+{% endfor %}
+{% endif %}
+
+# Work-commands
+{% if node_type == 'control' or node_type == 'hybrid' %}
+- work-command:
+    worktype: local
+    command: ansible-runner
+    params: worker
+    allowruntimeparams: true
+    verifysignature: true
+
+- work-kubernetes:
+    worktype: kubernetes-runtime-auth
+    authmethod: runtime
+    allowruntimeauth: true
+    allowruntimepod: true
+    allowruntimeparams: true
+    verifysignature: true
+
+- work-kubernetes:
+    worktype: kubernetes-incluster-auth
+    authmethod: incluster
+    allowruntimeauth: true
+    allowruntimepod: true
+    allowruntimeparams: true
+    verifysignature: true
+
+{% endif %}
+
+{% if node_type == 'execution' %}
+- work-command:
+    worktype: ansible-runner
+    command: ansible-runner
+    params: worker
+    verifysignature: true
+    allowruntimeparams: true
+{% endif %}

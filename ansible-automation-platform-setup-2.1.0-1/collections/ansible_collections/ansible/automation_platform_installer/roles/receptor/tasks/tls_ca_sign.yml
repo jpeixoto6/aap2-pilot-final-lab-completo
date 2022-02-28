@@ -1,0 +1,87 @@
+---
+- name: Receptor Mesh CA pending CSR(s)
+  when:
+    - receptor_tls_csr | default([]) | length
+    - receptor_tls_csr_pending is changed
+  block:
+
+  - name: Sign Receptor Mesh node certificate
+    delegate_to: "{{ groups['automationcontroller'][0] }}"
+    become: yes
+    become_user: receptor
+    shell: >
+      receptor --cert-signreq verify=yes
+      cacert="{{ receptor_ca_mesh_certfile }}"
+      cakey="{{ receptor_ca_mesh_keyfile }}"
+      req="{{ hostvars[inventory_hostname]['receptor_tls_csr']['source'] }}"
+      outcert="{{ receptor_tls_dir }}/{{ receptor_host_identifier }}.crt"
+      notafter="{{ hostvars[groups['automationcontroller'][0]]['_cert_expiry_date'] }}"
+
+  - name: Slurp Receptor Mesh CA certificates
+    delegate_to: "{{ groups['automationcontroller'][0] }}"
+    slurp:
+      src: "{{ receptor_tls_dir }}/{{ receptor_host_identifier }}.crt"
+    register: mesh_ca_nodes_data
+    no_log: true
+
+  - name: Copy Receptor Mesh certificate to final node
+    copy:
+      content: "{{ mesh_ca_nodes_data['content'] | b64decode }}"
+      dest: "{{ mesh_ca_nodes_data['source'] }}"
+      mode: 0640
+      owner: receptor
+      group: receptor
+    when: mesh_ca_nodes_data | default([]) | length
+
+  - name: Cleanup signed Receptor Mesh Certificates
+    delegate_to: "{{ groups['automationcontroller'][0] }}"
+    file:
+      state: absent
+      dest: "{{ mesh_ca_nodes_data['source'] }}"
+    when: inventory_hostname != groups['automationcontroller'][0]
+
+  - name: Gather Certificate Sign Requests files to be removed
+    find:
+      paths: "{{ receptor_tls_dir }}"
+      patterns: '*.csr'
+    register: _csr_to_remove_result
+
+  - name: Remove directory content
+    file:
+      path: "{{ item.path }}"
+      state: absent
+    with_items: "{{ _csr_to_remove_result.files }}"
+
+- name: Distribute Receptor Mesh CA to automationcontroller nodes
+  no_log: true
+  copy:
+    content: "{{ item['content'] | b64decode }}"
+    dest: "{{ item['source'] }}"
+    mode: 0640
+    owner: receptor
+    group: receptor
+  when:
+    - hostvars[groups['automationcontroller'][0]]['mesh_ca_data']['results'] | default([]) | length
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname in groups['automationcontroller']
+    - inventory_hostname != groups['automationcontroller'][0]
+  with_items:
+    - "{{ hostvars[groups['automationcontroller'][0]]['mesh_ca_data']['results'] }}"
+  notify:
+    - "Restart Receptor"
+
+- name: Distribute Receptor Mesh CA certificate to all execution_nodes
+  no_log: true
+  copy:
+    content: "{{ item['content'] | b64decode }}"
+    dest: "{{ item['source'] }}"
+    mode: 0640
+    owner: receptor
+    group: receptor
+  when:
+    - hostvars[groups['automationcontroller'][0]]['mesh_ca_data']['results'] | default([]) | length
+    - groups['execution_nodes'] | default([]) | length
+    - inventory_hostname in groups['execution_nodes']
+    - item['source'] == receptor_ca_mesh_certfile
+  with_items:
+    - "{{ hostvars[groups['automationcontroller'][0]]['mesh_ca_data']['results'] }}"

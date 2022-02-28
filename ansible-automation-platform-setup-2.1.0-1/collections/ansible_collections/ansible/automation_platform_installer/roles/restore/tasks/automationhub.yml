@@ -1,0 +1,33 @@
+---
+- block:
+    - name: hub | Ensure that /var/lib/pulp/ exists.
+      file:
+        group: pulp
+        mode: 0700
+        owner: pulp
+        path: /var/lib/pulp/
+        state: directory
+
+    - name: hub | Copy files into /var/lib/pulp/
+      shell: rsync -aq {{ backup_dir.rstrip("/") }}/restore/automationhub/var_lib_pulp/ /var/lib/pulp/
+
+  when: automationhub_backup_collections | default(true) | bool
+
+- block:
+    - name: Determine Automation Hub main URL
+      set_fact:
+        automationhub_main_url: "{{ automationhub_disable_https | default(false) | bool | ternary('http', 'https') }}://{{ groups['automationhub'][0] }}"
+      when: not automationhub_main_url | default('') | length
+
+    - set_fact:
+        sso_host: "{{ hostvars[groups['sso'][0]]['ansible_host'] | default(hostvars[groups['sso'][0]]['inventory_hostname']) }}"
+      when: not sso_host | default('') | length
+
+    - include_role:
+        name: ansible.automation_platform_installer.sso
+        tasks_from: update_client_url
+      vars:
+        sso_client_id: '{{ sso_automation_hub_client_id | default("automation-hub") }}'
+        sso_client_redirect_uri: '{{ automationhub_main_url }}/*'
+        sso_client_web_origins: '{{ automationhub_main_url }}/*'
+  when: groups['sso'] | default([]) | length

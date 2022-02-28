@@ -1,0 +1,67 @@
+- name: Start firewalld if it is enabled and not running
+  service:
+    name: firewalld
+    state: started
+  when:
+    - systemctl_unit_files.stdout_lines | select('match','firewalld.service\s+enabled') | list | length == 1
+    - firewalld_running.rc != 0
+
+- name: Enable base controller firewall ports
+  firewalld:
+    port: '{{item}}/tcp'
+    permanent: true
+    state: enabled
+    immediate: yes
+    zone: "{{ controller_firewalld_zone }}"
+  when: inventory_hostname in groups['automationcontroller'] | default([])
+  with_items: "{{ controller_firewall_ports }}"
+
+- name: Enable standalone database firewall ports
+  firewalld:
+    port: '{{item}}/tcp'
+    permanent: true
+    state: enabled
+    immediate: yes
+    zone: "{{ controller_firewalld_zone }}"
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname in groups['database'] | default([]) or
+      ( inventory_hostname == groups['automationcontroller'][0] and groups['automationhub'] | default([]) | length and not groups['database'] | default([]) | length )
+  with_items: "{{ database_firewall_ports }}"
+
+- name: Enable standalone database firewall ports for hub
+  firewalld:
+    port: '{{item}}/tcp'
+    permanent: true
+    state: enabled
+    immediate: yes
+    zone: "{{ pulp_firewalld_zone | default(omit) }}"
+  when:
+    - groups['automationhub'] | default([]) | length
+    - inventory_hostname in groups['database'] | default([])
+  with_items: "{{ database_firewall_ports }}"
+
+- name: Enable execution node firewall ports
+  firewalld:
+    port: '{{item}}/{{receptor_listener_protocol}}'
+    permanent: true
+    state: enabled
+    immediate: yes
+    zone: "{{ controller_firewalld_zone }}"
+  when: >
+    listener | default(False) | bool and
+    (inventory_hostname in groups['execution_nodes'] | default([]) or
+     inventory_hostname in groups['automationcontroller'] | default([]))
+  with_items: "{{ receptor_firewall_ports }}"
+
+- name: Enable sso firewall ports
+  firewalld:
+    port: '{{item}}/tcp'
+    permanent: true
+    state: enabled
+    immediate: yes
+    zone: "{{ sso_firewalld_zone | default(omit) }}"
+  when: inventory_hostname in groups['sso'] | default([])
+  with_items:
+    - 8080
+    - 8443

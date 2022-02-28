@@ -1,0 +1,9 @@
+---
+- name: Include calculate_mesh
+  include_tasks: calculate_mesh.yml
+
+- name: Include DNS asserts
+  include_tasks: assert_dns.yml
+
+- name: Include SSL asserts
+  include_tasks: assert_ssl.yml

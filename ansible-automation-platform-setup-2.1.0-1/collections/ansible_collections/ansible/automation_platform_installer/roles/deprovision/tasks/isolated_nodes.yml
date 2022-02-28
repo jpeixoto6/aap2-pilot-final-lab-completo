@@ -1,0 +1,41 @@
+---
+# receptor_host_identifier has the former contents of cluster_host_identifier var
+# we are just consuming the variable name instead creating a new one with the same content
+# shell: awx-manage provision_instance --is-isolated --hostname="{{ cluster_host_identifier }}"
+- name: Deprovision former isolated node instance from the database.
+  shell: awx-manage deprovision_instance --hostname="{{ receptor_host_identifier }}"
+  args:
+    executable: /bin/bash
+  become_user: awx
+  become: True
+  register: deprovision_node
+  changed_when: "'changed: True' in deprovision_node.stdout"
+  delegate_to: "{{ groups['automationcontroller'][0] }}"
+
+- name: Determine if the ansible-tower-isolated RPM is installed
+  command: rpm -qa ansible-tower-isolated
+  register: tower_iso_installed
+  changed_when: tower_iso_installed.stdout_lines | length > 0
+
+- name: Proceed with the isolated_nodes migration
+  when: tower_iso_installed is changed
+  block:
+
+    - name: Remove isolated_node related RPMs
+      shell: rpm -e {{ isolated_node_cleanup_rpm_list | join(' -e ') }}
+      ignore_errors: true
+
+    - name: Cleanup isolated_nodes files
+      file:
+        dest: "{{ item }}"
+        state: absent
+      with_items:
+        - "{{ isolated_node_cleanup_file_list }}"
+
+    - name: Recreate awx home directory
+      file:
+        path: /var/lib/awx
+        state: directory
+        owner: awx
+        group: awx
+        mode: 0755

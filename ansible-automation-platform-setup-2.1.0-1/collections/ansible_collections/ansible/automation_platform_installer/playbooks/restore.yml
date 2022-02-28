@@ -1,0 +1,145 @@
+---
+- hosts: database
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Temporarily grant createdb role to '{{ pg_username }}'
+      postgresql_user:
+        name: '{{ pg_username }}'
+        role_attr_flags: CREATEDB
+      become: yes
+      become_user: postgres
+      when: pg_username | default('') | length
+
+    - name: Temporarily grant createdb role to '{{ automationhub_pg_username }}'
+      postgresql_user:
+        name: '{{ automationhub_pg_username }}'
+        role_attr_flags: CREATEDB
+      become: yes
+      become_user: postgres
+      when: automationhub_pg_username | default('') | length
+
+- hosts: automationcontroller
+  any_errors_fatal: true
+  gather_facts: yes
+  vars_files: vars/collection_global_vars.yml
+  tasks:
+    - name: Stop Tower services on all nodes
+      command: automation-controller-service stop
+    - include_role:
+        name: ansible.automation_platform_installer.postgres
+        tasks_from: vars.yml
+    - include_role:
+        name: ansible.automation_platform_installer.config_dynamic
+    - name: Start database services on primary node if needed
+      service:
+        name: '{{ postgres_init_name }}'
+        state: started
+      when: config_dynamic_database == 'internal' and inventory_hostname == groups['automationcontroller'][0]
+
+- hosts: automationcontroller
+  any_errors_fatal: true
+  gather_facts: true
+  tasks:
+    - name: Temporarily grant createdb role to '{{ automationhub_pg_username }}'
+      postgresql_user:
+        name: '{{ automationhub_pg_username }}'
+        role_attr_flags: CREATEDB
+      become: yes
+      become_user: postgres
+      when:
+        - automationhub_pg_username | default('') | length
+        - groups['automationcontroller'] | default | length
+        - inventory_hostname == groups['automationcontroller'][0]
+        - config_dynamic_database == 'internal'
+        - automationhub_config_dynamic_database == 'external'
+
+- hosts: automationhub
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: hub | Retrieve list of pulpcore-worker services
+      shell: 'systemctl --type=service --state=running --no-legend list-units pulpcore-worker@\*.service | cut -d" " -f1'
+      changed_when: false
+      register: pulpcore_worker_services
+
+    - name: hub | Set pulpcore_services fact
+      set_fact:
+        _pulpcore_services:
+          - pulpcore-api
+          - pulpcore-content
+          - pulpcore-resource-manager
+          - '{{ pulpcore_worker_services.stdout_lines }}'
+          - nginx
+
+    - name: hub | Stop hub services
+      service:
+        name: '{{ item }}'
+        state: stopped
+      loop: '{{ _pulpcore_services | flatten(1) }}'
+
+- hosts: automationcontroller:sso:automationhub
+  any_errors_fatal: true
+  gather_facts: yes
+  vars_files: vars/collection_global_vars.yml
+  roles:
+    - role: ansible.automation_platform_installer.check_config_static
+    - role: ansible.automation_platform_installer.config_dynamic
+    - role: ansible.automation_platform_installer.restore
+      restore_database: "{{ config_dynamic_database }}"
+      automationhub_restore_database: "{{ automationhub_config_dynamic_database }}"
+      restore_pg_database: "{{ pg_database }}"
+
+- hosts: automationcontroller
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Start Tower services on all nodes
+      command: automation-controller-service start
+
+- hosts: automationcontroller
+  any_errors_fatal: true
+  gather_facts: true
+  tasks:
+    - name: Revoke createdb role from '{{ automationhub_pg_username }}'
+      postgresql_user:
+        name: '{{ automationhub_pg_username }}'
+        role_attr_flags: NOCREATEDB
+      become: yes
+      become_user: postgres
+      when:
+        - automationhub_pg_username | default('') | length
+        - groups['automationcontroller'] | default | length
+        - inventory_hostname == groups['automationcontroller'][0]
+        - config_dynamic_database == 'internal'
+        - automationhub_config_dynamic_database == 'external'
+
+- hosts: automationhub
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: hub | Start hub services
+      service:
+        name: '{{ item }}'
+        state: started
+      loop: '{{ _pulpcore_services | flatten(1) }}'
+
+- hosts: database
+  any_errors_fatal: true
+  gather_facts: false
+  tasks:
+    - name: Revoke createdb role from '{{ pg_username }}'
+      postgresql_user:
+        name: '{{ pg_username }}'
+        role_attr_flags: NOCREATEDB
+      become: yes
+      become_user: postgres
+      when: pg_username | default('') | length
+
+    - name: Revoke createdb role from '{{ automationhub_pg_username }}'
+      postgresql_user:
+        name: '{{ automationhub_pg_username }}'
+        role_attr_flags: NOCREATEDB
+      become: yes
+      become_user: postgres
+      when: automationhub_pg_username | default('') | length

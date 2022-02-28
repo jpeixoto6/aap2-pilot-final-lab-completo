@@ -1,0 +1,16 @@
+ansible-navigator:
+  ansible:
+    playbook: playbook.yml
+  app: run
+  execution-environment:
+    pull-policy: missing
+    volume-mounts:
+      - src: "/etc/openstack/clouds.yaml"
+        dest: "/etc/openstack/clouds.yaml"
+        label: "Z"
+    environment-variables:
+      pass:
+        - GUID
+  mode: stdout
+  playbook-artifact:
+    enable: False

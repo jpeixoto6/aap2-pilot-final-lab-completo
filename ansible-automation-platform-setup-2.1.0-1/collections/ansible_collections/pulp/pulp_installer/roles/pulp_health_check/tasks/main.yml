@@ -1,0 +1,38 @@
+---
+- name: Flush handlers
+  meta: flush_handlers
+
+- name: Get services
+  service_facts:
+
+- name: Listing Pulp services
+  debug:
+    msg: '{{ ansible_facts.services|dict2items|selectattr("key", "contains", "pulpcore")|list|items2dict }}'
+
+- name: Checking Pulp services
+  fail:
+    msg: "{{ item.value.name }} state: {{ item.value.state }}"
+  when: "item.value.name not in ['pulpcore-worker@.service', 'pulpcore.service'] and item.value.state != 'running'"
+  with_dict: '{{ ansible_facts.services|dict2items|selectattr("key", "contains", "pulpcore")|list|items2dict }}'
+
+- name: Ensure Pulp is up and healthy
+  uri:
+    url: "http://{{ __pulp_default_host if pulp_api_bind.startswith('unix:') else pulp_api_bind }}/pulp/api/v3/status/"
+    status_code: "200"
+    unix_socket: "{{ pulp_api_bind | regex_replace('^unix:', '') if pulp_api_bind.startswith('unix:') else omit }}"
+    # Alternate between 30 second timeouts and 5 second timeouts when handling the situation of
+    # there being a timeout (rather than connection refused), presumably due to a firewall.
+    timeout: "{{ result.elapsed | default(5) == 30 | ternary(5,30) }}"
+  register: result
+  until: >
+    result.json is defined and
+    result.json.database_connection.connected and
+    result.json.redis_connection.connected and
+    (
+      result.json.online_workers | map(attribute='name') | select('match', '^resource-manager$') | list | count > 0 or
+      pulp_settings.use_new_worker_type | default(true)
+    ) and
+    result.json.online_workers | map(attribute='name') | select('match', '^[0-9]+@.*$') | list | count > 0
+  delay: 6
+  retries: 75
+  check_mode: false

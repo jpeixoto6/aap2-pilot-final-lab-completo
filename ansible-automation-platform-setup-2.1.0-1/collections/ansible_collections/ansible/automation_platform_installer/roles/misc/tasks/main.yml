@@ -1,0 +1,70 @@
+---
+- name: Remove the old celeryd.py config file (if it exists)
+  file:
+    path: /etc/tower/conf.d/celeryd.py
+    state: absent
+
+- name: Check if /etc/tower/conf.d/ha.py exists
+  stat:
+    path: /etc/tower/conf.d/ha.py
+  register: ha_py
+  ignore_errors: true
+  no_log: true
+  failed_when: not ha_py.stat.exists
+
+- name: If Ansible does not provide a system UUID, get a random one.
+  shell: "echo 'import uuid; print(uuid.uuid4())' | awx-python"
+  register: generated_uuid
+  when: ha_py.failed | bool
+  changed_when: False
+
+- name: Register the uuid from the command line
+  set_fact:
+    system_uuid: "{{ generated_uuid.stdout }}"
+  when: ha_py.failed | bool and generated_uuid is defined
+  no_log: true
+
+- name: Read the uuid from /etc/tower/conf.d/ha.py
+  command: >
+    python3 -c "import sys; sys.path.append('/etc/tower/conf.d/'); import ha; print(ha.SYSTEM_UUID)"
+  register: ha_py_content
+  when: not ha_py.failed | bool
+  no_log: true
+
+- name: Store uuid from /etc/tower/conf.d/ha.py
+  set_fact:
+    system_uuid: "{{ ha_py_content.stdout }}"
+  when:
+    - not ha_py.failed | bool
+    - ha_py_content is defined
+  no_log: true
+
+- name: Write a ha.conf file to /etc/tower that contains the system UUID.
+  template:
+    dest: /etc/tower/conf.d/ha.py
+    force: yes
+    mode: '0640'
+    group: awx
+    owner: root
+    src: ha.py
+  when: ha_py.failed | bool
+
+- name: Check if tower queue is present
+  shell: awx-manage list_instances | grep '^\[tower capacity=[0-9]*\]'
+  args:
+    executable: /bin/bash
+  become_user: awx
+  become: true
+  run_once: true
+  register: register_tower
+  changed_when: false
+  failed_when: false
+
+- name: Unregister tower queue
+  shell: awx-manage unregister_queue --queuename=tower
+  args:
+    executable: /bin/bash
+  become_user: awx
+  become: true
+  run_once: true
+  when: "'[tower capacity=' in register_tower.stdout"

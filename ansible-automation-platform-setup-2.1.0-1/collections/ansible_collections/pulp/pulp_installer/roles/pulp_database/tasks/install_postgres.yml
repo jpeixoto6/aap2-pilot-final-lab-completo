@@ -1,0 +1,136 @@
+---
+# Try multiple possible names for the rhel7 SCL repo until it is found.
+# The query ensures that a single string rather than a list of strings is valid.
+- name: Find and enable the first found name of the RHEL7 SCL repo
+  include_tasks: ambiguously-named-repo.yml
+  loop: "{{ pulp_rhel7_scl_repo }}"
+  loop_control:
+    loop_var: __ambiguously_named_repo
+  when:
+    - ansible_facts.distribution == "RedHat"
+    - ansible_facts.distribution_major_version|int == 7
+    # Works for both strings and lists to make sure not empty
+    - pulp_rhel7_scl_repo is not none
+    - pulp_rhel7_scl_repo | length > 0
+    # Prevents running again once completed. Specific to the role name.
+    - __pulp_database_repo_enabled is not defined
+
+- name: Install SCL repo packages on CentOS 7
+  package:
+    name:
+      - 'centos-release-scl-rh'
+      - 'centos-release-scl'
+    state: present
+  become: yes
+  when:
+    - ansible_facts.distribution == "CentOS"
+    - ansible_facts.distribution_major_version|int == 7
+
+- block:
+    - name: Check if PostgreSQL < 10 is initialized.
+      stat:
+        path: "{{ postgresql_previous_data_dir }}/PG_VERSION"
+      register: previous_pgdata_dir_version
+
+    - name: Get PG_VERSION
+      command: "cat {{ postgresql_previous_data_dir }}/PG_VERSION"
+      register: pg_version
+      when: previous_pgdata_dir_version.stat.exists
+      tags:
+        - molecule-idempotence-notest
+
+    - name: Stop PostgreSQL < 10 service
+      systemd:
+        name: "{{ postgresql_previous_daemon }}"
+        state: stopped
+        enabled: no
+      when:
+        - previous_pgdata_dir_version.stat.exists
+        - pg_version is defined
+        - pg_version.changed
+        - pg_version.stdout is version('10', '<')
+
+    - name: Install scl-utils
+      package:
+        name:
+          - 'scl-utils'
+        state: present
+
+    - name: Install PostgreSQL SCL
+      yum:
+        name: "{{ postgresql_packages }}"
+        state: present
+        exclude: python-unversioned-command
+
+    - name: Enable PostgreSQL SCL
+      template:
+        src: templates/postgresql_scl_profile.j2
+        dest: "{{ postgresql_profile_path }}"
+
+    - name: Create SCL symlinks
+      file:
+        src: "{{ item }}"
+        dest: "{{ item.replace('/opt/rh/rh-postgresql10/root', '') }}"
+        state: link
+      loop:
+        - "/opt/rh/rh-postgresql10/root/usr/lib64/libpq.so.rh-postgresql10-5"
+        - "/opt/rh/rh-postgresql10/root/usr/bin/psql"
+      register: symlink_result
+      failed_when: "symlink_result is failed and 'refusing to convert from file to symlink' not in symlink_result.msg"
+      check_mode: false
+
+    # https://access.redhat.com/documentation/en-us/red_hat_software_collections/3/html/3.3_release_notes/chap-migration#sect-Migration-PostgreSQL-9_6-10
+    - name: Backup previous PostgreSQL
+      copy:
+        src: "{{ postgresql_previous_data_dir }}"
+        remote_src: yes
+        dest: "{{ postgresql_data_dir.replace('data', 'backup') }}"
+      check_mode: false
+      when:
+        - previous_pgdata_dir_version.stat.exists
+        - pg_version is defined
+        - pg_version.changed
+        - pg_version.stdout is version('10', '<')
+
+    - name: Check if PostgreSQL database is initialized.
+      stat:
+        path: "{{ postgresql_data_dir }}/PG_VERSION"
+      register: pgdata_dir_version
+
+    - name: Upgrade to PostgreSQL 10
+      shell: >-
+        source scl_source enable rh-postgresql10
+        && {{ postgresql_bin_path }}/postgresql-setup --upgrade --upgrade-from=rh-postgresql96-postgresql
+      when:
+        - not pgdata_dir_version.stat.exists
+        - previous_pgdata_dir_version.stat.exists
+        - pg_version is defined
+        - pg_version.changed
+        - pg_version.stdout is version('10', '<')
+
+    - name: Check if PostgreSQL database is initialized.
+      stat:
+        path: "{{ postgresql_data_dir }}/PG_VERSION"
+      register: pgdata_dir_version
+
+    - name: Ensure PostgreSQL database is initialized.
+      shell: >-
+        source scl_source enable rh-postgresql10
+        && {{ postgresql_bin_path }}/initdb -D {{ postgresql_data_dir }}
+      when:
+        - not pgdata_dir_version.stat.exists
+      become: true
+      become_user: "{{ postgresql_user }}"
+      vars:
+        ansible_ssh_pipelining: true
+
+  become: yes
+  when:
+    - ansible_facts.os_family == 'RedHat'
+    - ansible_facts.distribution_major_version|int == 7
+
+- block:
+    - name: Install and configure PostgreSQL
+      include_role:
+        name: geerlingguy.postgresql
+  become: yes

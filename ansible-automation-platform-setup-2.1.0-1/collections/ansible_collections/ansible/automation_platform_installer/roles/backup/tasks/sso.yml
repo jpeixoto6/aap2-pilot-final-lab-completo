@@ -1,0 +1,17 @@
+---
+- name: Stop SSO server
+  service:
+    name: '{{ sso_app_name }}'
+    enabled: yes
+    state: stopped
+
+- name: Export H2 database
+  command: java -cp modules/system/layers/base/com/h2database/h2/main/h2.jar org.h2.tools.Script -url jdbc:h2:./standalone/data/keycloak -user sa -password sa -script {{ backup_dir.rstrip("/") }}/sso/sso.db.zip -options compression zip
+  args:
+    chdir: '{{ sso_home_dir }}'
+
+- name: Start SSO server
+  service:
+    name: '{{ sso_app_name }}'
+    enabled: yes
+    state: started

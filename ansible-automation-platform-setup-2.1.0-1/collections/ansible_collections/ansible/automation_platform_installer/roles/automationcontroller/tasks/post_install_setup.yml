@@ -1,0 +1,59 @@
+- block:
+    - set_fact:
+        _hub_host: "{{ hostvars[groups['automationhub'][0]]['automationhub_main_url'] | urlsplit('hostname') + '/'}}"
+
+    - name: Create execution environment list for Hub
+      set_fact:
+        hub_execution_environments: "{{ hub_execution_environments | default([]) + [{'name':  'Automation Hub ' + item['name'], 'image': item['image'].replace(_ee_image_base,_hub_host) }] }}"
+      with_items: "{{ global_job_execution_environments }}"
+
+    - name: Update global_job_execution_environments for Hub (non-bundle)
+      set_fact:
+        _global_job_execution_environments: "{{ global_job_execution_environments + hub_execution_environments }}"
+      when: not bundle_install | default(false) | bool
+
+    - name: Update execution environment images for Hub (bundle)
+      set_fact:
+        _global_job_execution_environments: "{{ hub_execution_environments + global_job_execution_environments }}"
+        _control_plane_execution_environment: "{{ control_plane_execution_environment.replace(_ee_image_base,_hub_host) }}"
+        _container_groups_image: "{{ container_groups_image.replace(_ee_image_base,_hub_host) }}"
+      when: bundle_install | default(false) | bool
+
+  run_once: true
+  when: groups['automationhub'] | default([]) | length
+
+- name: Set Execution Environment configuration
+  template:
+    dest: /etc/tower/conf.d/execution_environments.py
+    force: yes
+    src: execution_environments.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+  notify:
+    - restart nginx
+    - restart supervisor
+
+- name: Set default image for Container Groups
+  template:
+    dest: /etc/tower/conf.d/container_groups.py
+    force: yes
+    src: container_groups.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+  notify:
+    - restart nginx
+    - restart supervisor
+
+- name: Set ignore galaxy SSL cert verification option
+  template:
+    dest: /etc/tower/conf.d/galaxy_ssl_cert_verification.py
+    force: yes
+    src: galaxy_cert_verification.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+  notify:
+    - restart nginx
+    - restart supervisor

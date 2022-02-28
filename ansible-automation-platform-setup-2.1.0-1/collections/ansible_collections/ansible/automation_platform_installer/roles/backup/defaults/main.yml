@@ -1,0 +1,4 @@
+---
+backup_dir: /var/backups/automation-platform/
+backup_dest: '{{ lookup("env", "PWD") }}'
+backup_file_prefix: automation-platform-backup

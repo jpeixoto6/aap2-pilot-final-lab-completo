@@ -1,0 +1,190 @@
+---
+- name: Preflight check - require new enough Ansible
+  fail:
+    msg: "Your current version of Ansible ({{ ansible_version['full']}}) is too old for this version of Ansible Automation Platform. Please upgrade."
+  when: ansible_version.full is version_compare(minimum_ansible_version, '<')
+
+- name: Preflight check - Fail if this machine lacks sufficient RAM.
+  fail:
+    msg: This machine does not have sufficient RAM to run Ansible Automation Platform.
+  when:
+    - ansible_memtotal_mb < required_ram|int
+    - not ignore_preflight_errors| default(false) | bool
+
+- name: Preflight check - Get /var/log permissions
+  stat: path=/var/log
+  register: vl_st
+
+- name: Preflight check - Does /var/log have appropriate permissions?
+  fail:
+    msg: 'The permissions on /var/log ({{ vl_st.stat.mode }}) prevent successful installation. /var/log must be world-readable.'
+  when: not vl_st.stat.roth
+
+- name: Preflight check - Read in controller version
+  slurp:
+    src: "/var/lib/awx/.tower_version"
+  register: result
+  ignore_errors: true
+  when:
+    - inventory_hostname not in groups['automationhub'] | default([])
+
+- name: Preflight check - Perform fresh install checks
+  when: result.content is not defined
+  block:
+    - name: Preflight check - Passwords must be defined for a fresh install
+      fail:
+        msg: 'Please configure passwords in the inventory file before running setup'
+      when:
+        - "(pg_password|default('') == '') or (admin_password|default('') == '')"
+        - groups['automationcontroller'] | default([]) | length
+      delegate_to: localhost
+      run_once: True
+
+    - name: Preflight check - Automation hub passwords must be defined for a fresh install (if hub is enabled)
+      fail:
+        msg: 'Please configure automationhub passwords in the inventory file before running setup'
+      when:
+        - "(automationhub_pg_password|default('') == '') or (automationhub_admin_password|default('') == '')"
+        - groups['automationhub'] | default([]) | length
+      delegate_to: localhost
+      run_once: True
+
+    - name: Find mount options for /var, /var/tmp, and /tmp
+      check_mode: yes
+      lineinfile:
+        name: /proc/mounts
+        regexp: ' {{ item }} .*noexec'
+        state: absent
+      loop:
+        - "/var"
+        - "/var/tmp"
+        - "/tmp"
+      register: mount
+
+    - name: Fail if the filesystem is mounted with noexec
+      fail:
+        msg: "{{ item.item }} cannot be mounted w/ noexec"
+      when: ((item is changed) or (item is failed)) and not ignore_preflight_errors|default(False)|bool
+      loop: "{{ mount.results }}"
+
+    - name: Ensure hostname on nodes with receptor installed is not localhost
+      fail:
+        msg: "The system hostname cannot be localhost, receptor requires it to be set to something other than localhost"
+      when:
+        - ansible_hostname is match('localhost*')
+        - inventory_hostname in groups['automationcontroller'] | default([]) or inventory_hostname in groups['execution_nodes'] | default([])
+
+- name: Preflight check - Perform upgrade checks
+  when: result.content is defined
+  block:
+    - name: Preflight check - User must be on 3.8.x to upgrade
+      fail:
+        msg: 'Please upgrade to 3.8.x before upgrading to {{ tower_package_version }} or later'
+      when: result.content|b64decode is version_compare('3.8', '<')
+
+    - name: Preflight check - check for custom virtual environments
+      find:
+        paths: /var/lib/awx/venv
+        file_type: directory
+        excludes: '^(ansible|awx)$'
+        use_regex: true
+      become_user: awx
+      become: True
+      register: custom_venvs
+      
+    - name: Preflight check - check for custom virtual environment path setting
+      shell: awx-manage print_settings | grep  '^CUSTOM_VENV_PATHS' | awk '{ print $3 }'
+      become_user: awx
+      become: True
+      register: custom_venv_paths
+      ignore_errors: True
+
+    - name: Preflight check - warn if custom virtual environments present
+      fail:
+        msg: "The use of custom virtual environments have been replaced by automation execution environments. Please see the documentation at https://red.ht/AAP-20 for details."
+      ignore_errors: True
+      when: custom_venvs.matched > 0 or custom_venv_paths.stdout != '[]'
+
+    - name: Preflight check - pause if warning
+      pause:
+        seconds: 10
+      when: custom_venvs.matched > 0 or custom_venv_paths.stdout != '[]'
+      
+    - name: Preflight check - check license type
+      shell: awx-manage check_license
+      become_user: awx
+      become: True
+      register: license_type
+
+    - name: Preflight check - check license type (detailed)
+      shell: awx-manage check_license --data
+      become_user: awx
+      become: True
+      register: subscription_details
+
+    - name: Preflight check - check license validity for upgrades
+      fail:
+        msg: "A valid Ansible Autoamtion Platform license is required to upgrade."
+      when: "license_type is defined and license_type.stdout == 'open'"
+
+    - name: Preflight check - check subscription compliance for upgrades
+      fail:
+        msg: "A compliant Ansible Automation Platform subscription is required to upgrade. Subscription details: {{ subscription_details }}"
+      when:
+        - result.content|b64decode is not version_compare(tower_package_version, '=')
+        - subscription_details is defined
+        - subscription_details is not failed
+        - not (subscription_details.stdout | from_json).compliant | bool
+
+- name: Preflight check - Ensure rabbitmq_host is not defined
+  fail:
+    msg: "rabbitmq_host set for host '{{ inventory_hostname }}'. Please use routable_hostname instead"
+  when: rabbitmq_host is defined
+  delegate_to: localhost
+
+- block:
+  - name: Preflight check - Ensure that psycopg2 python library is installed
+    yum:
+      name: python3-psycopg2
+      state: present
+
+  - name: Preflight check - Ensure User-Provided Postgres Instance is at Version 12 or Higher
+    postgresql_query:
+      db: "{{ pg_database }}"
+      port: "{{ pg_port }}"
+      login_host: "{{ pg_host }}"
+      login_user: "{{ pg_username }}"
+      login_password: "{{ pg_password }}"
+      query: "SHOW server_version;"
+      ssl_mode: "{{ pg_sslmode }}"
+    register: postgres_version
+
+  - set_fact:
+      postgres_version: "{{ postgres_version.query_result[0].server_version | regex_search(regexp) }}"
+    vars:
+      regexp: '[-+]?\d+\.\d+'
+
+  - assert:
+      that:
+      - postgres_version|float >= 12.0
+      fail_msg: "PostgreSQL version (detected: {{ postgres_version }}) must be higher than 12"
+      success_msg: "PostgreSQL version (detected: {{ postgres_version }}) satisfies version requirements"
+  when:
+  - not (groups['database'] | default([]) | length)
+  - config_dynamic_database == "external"
+  delegate_to: "{{ groups['automationcontroller'][0] }}"
+
+- block:
+    - name: Preflight check - Check if /var/lib/pulp exists for Hub HA mode
+      stat:
+        path: /var/lib/pulp
+      register: var_lib_pulp_dir
+      timeout: 20
+
+    - name: Preflight check - /var/lib/pulp must exist for Hub HA mode
+      fail:
+        msg: "Automation Hub in cluster mode requires a shared filesystem for /var/lib/pulp on all nodes"
+      when: not var_lib_pulp_dir.stat.exists
+  when:
+    - groups['automationhub'] | default([]) | length > 1
+    - inventory_hostname in groups['automationhub']

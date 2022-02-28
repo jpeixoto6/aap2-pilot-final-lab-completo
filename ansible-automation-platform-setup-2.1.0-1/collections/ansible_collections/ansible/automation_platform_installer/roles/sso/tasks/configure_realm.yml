@@ -1,0 +1,38 @@
+---
+- name: Set realm SSL option
+  set_fact:
+    sso_automation_platform_realm_ssl: "{{ 'all' if sso_use_https | bool else 'none' }}"
+  when: sso_automation_platform_realm_ssl is not defined
+
+- name: Create or update {{ sso_automation_platform_realm }} realm
+  keycloak_realm:
+    auth_client_id: admin-cli
+    auth_keycloak_url: '{{ sso_api_url_base }}'
+    auth_realm: master
+    auth_username: '{{ sso_console_admin_username }}'
+    auth_password: '{{ sso_console_admin_password }}'
+    id: '{{ sso_automation_platform_realm }}'
+    realm: '{{ sso_automation_platform_realm }}'
+    display_name: '{{ sso_automation_platform_realm_displayname }}'
+    state: present
+    ssl_required: '{{ sso_automation_platform_realm_ssl }}'
+    validate_certs: false
+    enabled: yes
+    login_theme: '{{ sso_automation_platform_login_theme | basename }}'
+  no_log: true
+
+- name: Get {{ sso_automation_platform_realm }} realm
+  uri:
+    url: "{{ sso_api_url_base }}/realms/{{ sso_automation_platform_realm }}"
+    method: GET
+    headers:
+      Authorization: 'Bearer {{ sso_token }}'
+    validate_certs: false
+  no_log: true
+  ignore_errors: true
+  register: sso_get_realm
+
+- name: Get realm public key
+  set_fact:
+    sso_realm_public_key: "{{ sso_get_realm.json.public_key }}"
+  no_log: true

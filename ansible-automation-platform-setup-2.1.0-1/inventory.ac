@@ -1,0 +1,34 @@
+[automationcontroller]
+ac.example.com
+
+
+[automationcontroller:vars]
+node_type=control
+peers=execution_nodes
+
+[execution_nodes]
+exec.example.com
+
+[database]
+db.example.com
+
+
+
+[all:vars]
+admin_password='r3dh4t1!'
+ansible_become=true
+pg_host='db.example.com'
+pg_port='5432'
+pg_database='automationcontroller'
+pg_username='ac'
+pg_password='r3dh4t1'
+pg_sslmode='prefer'
+
+
+# Execution Environment Configuration
+# Credentials for container registry to pull execution environment images from,
+# registry_username and registry_password are required for registry.redhat.io
+registry_url='registry.redhat.io'
+registry_username='jpeixoto@redhat.com'
+registry_password='RedPcyri*12'
+

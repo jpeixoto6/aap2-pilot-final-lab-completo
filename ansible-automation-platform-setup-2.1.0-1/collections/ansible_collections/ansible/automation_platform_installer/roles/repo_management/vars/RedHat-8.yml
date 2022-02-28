@@ -1,0 +1,5 @@
+---
+yum_repo_keys:
+  - 'RPM-GPG-KEY-redhat-release'
+
+redhat_automation_platform_rhsm_repo: '{{ automation_platform_channel }}'

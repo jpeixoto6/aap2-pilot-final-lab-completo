@@ -1,0 +1,44 @@
+---
+- name: Determine if {{ packages_el_tower_package_name }} automation-controller RPM is installed
+  command: rpm -qa {{ packages_el_tower_package_name }}
+  register: controller_installed
+  changed_when: controller_installed.stdout_lines | length > 0
+
+- name: Stop and disable controller services
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  with_items: "{{ controller_services_list }}"
+
+- name: Remove controller related RPMs
+  shell: rpm -e {{ controller_cleanup_rpm_list | join(' -e ') }}
+  ignore_errors: true
+
+- name: Cleanup controller files
+  file:
+    dest: "{{ item }}"
+    state: absent
+  with_items:
+    - "{{ controller_cleanup_files_list }}"
+
+- name: Gather supervisord log files
+  find:
+    paths: /var/log/supervisor
+    recurse: yes
+  register: supervisor_files_to_delete
+  no_log: true
+
+- name: Cleanup supervisord logs
+  file:
+    dest: "{{ item.path }}"
+    state: absent
+  no_log: true
+  with_items:
+    - "{{ supervisor_files_to_delete.files }}"
+
+- name: Remove awx user
+  user:
+    name: awx
+    state: absent
+    remove: yes

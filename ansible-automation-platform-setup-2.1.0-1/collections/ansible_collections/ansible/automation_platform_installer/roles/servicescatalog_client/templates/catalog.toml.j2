@@ -1,0 +1,19 @@
+[ANSIBLE_TOWER]
+token="{{ _servicescatalog_controller_token }}"
+url="https://{{ _servicescatalog_controller_hostname }}"
+verify_ssl="{{ servicescatalog_controller_validate_certs | bool }}"
+name="{{ servicescatalog_controller_name | default(_servicescatalog_controller_hostname) }}"
+uuid="{{ _servicescatalog_controller_uuid }}"
+
+[AUTH]
+client_cert="{{ system_cert_file }}"
+client_key="{{ system_key_file }}"
+
+[logger]
+# valid levels are error, info, debug, warn
+level="{{ log_level }}"
+
+[PROXIES]
+HTTP_PROXY="{{ servicescatalog_http_proxy }}"
+HTTPS_PROXY="{{ servicescatalog_https_proxy }}"
+NO_PROXY="{{ servicescatalog_no_proxy }}"

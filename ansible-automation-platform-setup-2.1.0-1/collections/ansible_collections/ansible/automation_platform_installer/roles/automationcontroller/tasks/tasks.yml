@@ -1,0 +1,476 @@
+---
+- name: Ensure awx is in the nginx group
+  user:
+    append: yes
+    name: awx
+    groups: nginx
+
+- name: Configure the settings directory.
+  file: path=/etc/tower state=directory owner=root group=awx mode=0755
+
+- name: Configure the socket directory.
+  file: path=/var/run/tower state=directory owner=nginx group=nginx mode=2775
+
+- name: Configure the socket directory for tmpfiles.d
+  template:
+    src: tower.conf.j2
+    dest: /etc/tmpfiles.d/tower.conf
+    force: yes
+    mode: '0640'
+    owner: root
+    group: root
+
+- name: Configure the system user's home directory.
+  file: path=/var/lib/awx state=directory owner=awx group=awx mode=0755
+
+- name: Configure the system user's .ssh directory.
+  file: path=/var/lib/awx/.ssh state=directory owner=awx group=awx mode=0700
+
+- name: Configure the projects directory.
+  file: path=/var/lib/awx/projects state=directory owner=awx group=awx mode=0750
+
+- name: Configure the job output directory.
+  file: path=/var/lib/awx/job_status state=directory owner=awx group=awx mode=0750
+
+- name: Configure the static directory.
+  file: path=/var/lib/awx/public/static state=directory owner=root group=awx mode=0755 recurse=yes
+
+- name: Add `conf.d` directory.
+  file: path=/etc/tower/conf.d state=directory owner=root group=awx mode=0750
+
+- name: Configure the log directory.
+  file: path=/var/log/tower state=directory owner=awx group=awx mode=0750
+
+- name: Update awx_supervisord logrotate config file
+  copy:
+    src: logrotate_awx_supervisord
+    dest: '/etc/logrotate.d/awx_supervisord'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Update hourly cron logrotate invocation
+  copy:
+    src: logrotate_cron.hourly
+    dest: '/etc/cron.hourly/logrotate'
+    owner: root
+    group: root
+    mode: '0744'
+
+# Update service configuration information for the automation-controller-service script
+- name: Update automation-controller-service configuration
+  template:
+    src: automation-controller.sysconfig.j2
+    dest: '/etc/sysconfig/automation-controller'
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Update automation-controller service configuration
+  copy:
+    remote_src: yes
+    src: '/lib/systemd/system/automation-controller.service'
+    dest: '/etc/systemd/system/automation-controller.service'
+    owner: root
+    group: root
+    mode: '0644'
+
+# When running with an external database, we need to remove 'postgresql' from
+# the list of automation controller managed services.
+- name: Update automation-controller service configuration (postgresql)
+  replace:
+    path: '/etc/systemd/system/automation-controller.service'
+    regexp: 'postgresql.service'
+    replace: "{{ '' if awx_install_database == 'external' else awx_install_pg_init_name + '.service'}}"
+
+- name: Update dependent service configuration
+  file:
+    path: "/etc/systemd/system/{{ item }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "nginx"
+    - "supervisord"
+    - "{{ awx_install_redis_init_name }}"
+    - "{{ awx_install_pg_init_name | default(omit) }}"
+
+- name: Update dependent service configuration
+  copy:
+    src: "{{ lookup('first_found', override) }}"
+    dest: "/etc/systemd/system/{{ item }}.service.d/override.conf"
+    mode: 0644
+    owner: root
+    group: root
+  vars:
+    override:
+      - "files/override-{{ item }}.conf"
+      - "files/override.conf"
+  loop:
+    - "nginx"
+    - "supervisord"
+    - "{{ awx_install_redis_init_name }}"
+    - "{{ awx_install_pg_init_name | default(omit) }}"
+
+- name: Reload systemd configuration
+  command: systemctl daemon-reload
+
+- name: Enable the automation-controller service
+  service:
+    name: automation-controller
+    enabled: true
+
+- name: Check if this is a fresh installation
+  stat:
+    path: /var/lib/awx/.tower_version
+  register: previous_install_status
+
+- name: Replace the secret key if secret_key_override is defined and installation is new
+  copy:
+    content: '{{ secret_key_override }}'
+    dest: '/etc/tower/SECRET_KEY'
+    force: yes
+    owner: 'root'
+    group: 'awx'
+    mode: '0640'
+  when:
+    - inventory_hostname == groups['automationcontroller'][0]
+    - secret_key_override is defined
+    - previous_install_status.stat.exists == false
+  no_log: True
+
+- name: Fetch the secret key from the primary node.
+  slurp:
+    src: /etc/tower/SECRET_KEY
+  when: inventory_hostname == groups['automationcontroller'][0]
+  register: secret_key
+  no_log: True
+
+- name: Fail play when grabbing SECRET_KEY fails
+  fail:
+    msg: "Failed to read /etc/tower/SECRET_KEY from primary node"
+  when: "hostvars[groups['automationcontroller'][0]]['secret_key'].content is not defined"
+
+- name: Place the secret key on secondary nodes.
+  copy:
+    content: "{{ hostvars[groups['automationcontroller'][0]]['secret_key']['content'] | b64decode }}"
+    dest: /etc/tower/SECRET_KEY
+    force: yes
+    mode: '0640'
+    owner: root
+    group: awx
+  when: inventory_hostname != groups['automationcontroller'][0]
+  no_log: True
+
+- name: Get database settings
+  shell: "awx-manage print_settings | grep '^DATABASES'"
+  become_user: awx
+  become: True
+  register: results
+  changed_when: False
+  failed_when: false
+  no_log: True
+
+- name: Ingest database settings
+  set_fact:
+    controller_db_settings: "{{ results.stdout | regex_replace('DATABASES\\s+= ', '') }}"
+  no_log: True
+  when: results.rc == 0
+
+- name: Set database vars
+  set_fact:
+    awx_install_pg_database__: "{{ awx_install_pg_database }}"
+    awx_install_pg_username__: "{{ awx_install_pg_username }}"
+    awx_install_pg_password__: "{{ awx_install_pg_password }}"
+    awx_install_pg_host__: "{{ awx_install_pg_host }}"
+    awx_install_pg_port__: "{{ awx_install_pg_port }}"
+  no_log: True
+  when: results.rc != 0
+
+- name: Set database vars
+  set_fact:
+    awx_install_pg_database__: "{{ awx_install_pg_database or controller_db_settings.default.NAME }}"
+    awx_install_pg_username__: "{{ awx_install_pg_username or controller_db_settings.default.USER }}"
+    awx_install_pg_password__: "{{ awx_install_pg_password or controller_db_settings.default.PASSWORD }}"
+    awx_install_pg_host__: "{{ awx_install_pg_host or controller_db_settings.default.HOST }}"
+    awx_install_pg_port__: "{{ awx_install_pg_port or controller_db_settings.default.PORT }}"
+  no_log: True
+  when: results.rc == 0
+
+- name: Configure database settings.
+  template:
+    dest: /etc/tower/conf.d/postgres.py
+    force: yes
+    src: postgres.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+  register: result
+  notify:
+    - restart nginx
+    - restart supervisor
+
+- name: Handles /etc/tower/conf.d/channels.py
+  when: inventory_hostname == groups['automationcontroller'][0]
+  run_once: true
+  block:
+
+    - name: Check for existance of /etc/tower/conf.d/channels.py
+      stat:
+        path: /etc/tower/conf.d/channels.py
+      register: channels_py
+
+    - name: Generate broadcast websocket secret when /etc/tower/conf.d/channels.py is not present
+      set_fact:
+        broadcast_websocket_secret: "{{ lookup('password', '/dev/null length=128') }}"
+      no_log: true
+      when: not channels_py.stat.exists
+
+    - name: Deploy /etc/tower/conf.d/channels.py
+      template:
+        dest: /etc/tower/conf.d/channels.py
+        force: yes
+        src: channels.py.j2
+        mode: '0640'
+        owner: root
+        group: awx
+      notify:
+        - restart nginx
+        - restart supervisor
+      when: channels_py.stat.exists == false and broadcast_websocket_secret is defined
+
+    - name: "Slurp /etc/tower/conf.d/channels.py"
+      slurp:
+        src: /etc/tower/conf.d/channels.py
+      no_log: true
+      register: channels_py_override
+
+- name: Sync /etc/tower/conf.d/channels.py to all '[automationcontroller]' nodes
+  copy:
+    content: "{{ hostvars[groups['automationcontroller'][0]]['channels_py_override']['content'] | b64decode }}"
+    dest: /etc/tower/conf.d/channels.py
+    mode: '0640'
+    owner: root
+    group: awx
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - hostvars[groups['automationcontroller'][0]]['channels_py_override'] | default([]) | length
+    - inventory_hostname in groups['automationcontroller']
+    - inventory_hostname != groups['automationcontroller'][0]
+  notify:
+    - restart nginx
+    - restart supervisor
+
+- name: Configure the Insights URL
+  template:
+    dest: /etc/tower/conf.d/insights.py
+    force: yes
+    src: insights.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+  notify:
+    - restart nginx
+    - restart supervisor
+
+- name: Initialize instance groups for host
+  set_fact:
+    awx_instance_groups: []
+
+- name: Determine instance groups for host
+  set_fact:
+    awx_instance_groups: "{{ awx_instance_groups }} + [ '{{ item|regex_replace('^instance_group_','') }}' ]"
+  with_items: "{{group_names}}"
+  when: item is match("(^automationcontroller|^instance_group_.+)$")
+
+- name: Remove rabbitmq settings
+  file:
+    path: /etc/tower/conf.d/rabbitmq.py
+    state: absent
+
+- name: Configure CLUSTER_HOST_ID setting
+  template:
+    dest: /etc/tower/conf.d/cluster_host_id.py
+    force: yes
+    src: cluster_host_id.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+
+- name: Remove memcached settings
+  file:
+    path: /etc/tower/conf.d/caching.py
+    state: absent
+
+- name: Install settings file if it does not already exist.
+  template:
+    dest: /etc/tower/settings.py
+    force: yes
+    backup: yes
+    src: settings.py.j2
+    mode: '0640'
+    owner: root
+    group: awx
+  notify:
+    - restart nginx
+    - restart supervisor
+
+- name: Check for pending migrations
+  become: True
+  become_user: awx
+  shell: "awx-manage showmigrations | grep -v '[X]' | grep '[ ]' | wc -l"
+  changed_when: false
+  register: pending_db_migration
+  when: inventory_hostname == groups['automationcontroller'][0]
+
+- name: Handle the DB migration
+  when:
+    - hostvars[groups['automationcontroller'][0]]['pending_db_migration'] is defined
+    - hostvars[groups['automationcontroller'][0]]['pending_db_migration'].stdout|int != 0
+  block:
+
+    - name: Stop supervisor due to database schema upgrade
+      service:
+        name: supervisord
+        state: stopped
+
+    - name: Wait for supervisor to stop.
+      stat:
+        path: '/var/run/supervisor/supervisor.sock'
+      register: result
+      until: not result.stat.exists
+      retries: 10
+      delay: 2
+
+    - name: Migrate the database schema (may take awhile when upgrading).
+      command: awx-manage migrate --noinput
+      become_user: awx
+      become: True
+      register: tower_migrate
+      changed_when: "tower_migrate.stdout is defined and 'No migrations to apply' not in tower_migrate.stdout"
+      when: inventory_hostname == groups['automationcontroller'][0]
+      notify:
+        - restart supervisor
+  rescue:
+    - name: Database Migration failed, please check the suggest KCS
+      debug:
+        msg: "Database Migration failed because of SECRET_KEY issue, please check this KCS to solve the issue: https://access.redhat.com/solutions/3407391"
+      when:
+        - tower_migrate is defined
+        - inventory_hostname == groups['automationcontroller'][0]
+        - "'cryptography.fernet.InvalidToken' in tower_migrate.stderr"
+      failed_when: true
+
+- name: Checking for RBAC migration log
+  stat: path=/tmp/tower_rbac_migrations.log
+  register: rbac_log
+
+- name: Moving RBAC migration log
+  command: mv /tmp/tower_rbac_migrations.log /var/log/tower
+  when: rbac_log.stat.exists
+
+- name: Get the controller version
+  shell: awx-manage version
+  become_user: awx
+  become: True
+  register: tower_version
+
+- name: Store the controller version
+  copy:
+    dest: '/var/lib/awx/.tower_version'
+    owner: root
+    group: root
+    mode: 0644
+    content: '{{ tower_version.stdout }}'
+  become_user: root
+  become: True
+
+- name: Get configuration files to set permissions on
+  find:
+    paths:
+      - /etc/tower
+      - /etc/tower/conf.d
+    patterns: '*.py'
+  register: configuration_files
+
+- name: Clean up any poorly-permissioned configuration files on upgrade
+  file:
+    path: "{{ item.path }}"
+    state: file
+    owner: root
+    group: awx
+    mode: 0640
+  become_user: root
+  become: True
+  with_items: "{{ configuration_files.files }}"
+
+- name: Set ACL rule for awx user to access rhsm.conf
+  acl:
+    path: /etc/rhsm/rhsm.conf
+    entity: awx
+    etype: user
+    permissions: r
+    state: present
+
+- name: Check for super users
+  shell: echo "from django.contrib.auth.models import User; nsu = User.objects.filter(is_superuser=True).count(); exit(0 if nsu > 0 else 1)" | awx-manage shell
+  register: super_check
+  become_user: awx
+  become: True
+  ignore_errors: yes
+  changed_when: super_check.rc > 0
+  when: inventory_hostname == groups['automationcontroller'][0]
+
+- name: create django super user if it does not exist
+  shell: awx-manage createsuperuser --username={{ admin_username | quote }} --email={{ admin_email | quote }} --noinput
+  register: result
+  changed_when: "'That username is already taken' not in result.stderr"
+  failed_when: "'That username is already taken' not in result.stderr and 'Superuser created successfully' not in result.stdout"
+  become_user: awx
+  become: True
+  no_log: True
+  when: inventory_hostname == groups['automationcontroller'][0] and super_check.rc > 0
+
+- name: update django super user password
+  shell: awx-manage update_password --username='{{ admin_username }}' --password='{{ awx_install_admin_password }}'
+  become_user: awx
+  become: True
+  no_log: True
+  register: result
+  changed_when: "'Password updated' in result.stdout"
+  when: awx_install_admin_password != '' and inventory_hostname == groups['automationcontroller'][0]
+
+- name: Collect static files.
+  shell: umask 022 && awx-manage collectstatic --noinput --clear -v0
+  become_user: root
+  become: True
+  when: tower_package_name == "automation-controller"
+  # When using --clear, this command will *always* result in a change
+  # register: awx_collectstatic
+  # changed_when: "not awx_collectstatic.stdout_lines[-1].startswith('0 static files')"
+
+- name: Fixup log directory permissions post-migration
+  file:
+    path: '/var/log/tower'
+    state: 'directory'
+    owner: awx
+    group: awx
+    recurse: true
+    mode: 'u=rwX,g=rX,o-rwx'
+
+- name: Copy Candlepin RHSM Certificate
+  copy:
+    src: "candlepin-redhat-ca.crt"
+    dest: "/etc/tower/candlepin-redhat-ca.crt"
+    mode: 0640
+    owner: root
+    group: awx
+
+- name: Copy EULA
+  copy:
+    dest: /var/lib/awx/venv/awx/lib/python3.8/site-packages/awx/api/templates/eula.md
+    src: eula.md
+    mode: 0640
+    owner: root
+    group: awx

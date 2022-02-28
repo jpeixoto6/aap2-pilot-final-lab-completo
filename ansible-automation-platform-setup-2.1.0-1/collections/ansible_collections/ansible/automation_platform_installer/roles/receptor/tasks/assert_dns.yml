@@ -1,0 +1,29 @@
+---
+# We run this test when receptor_host_identifier is not an IP address.
+# We want to avoid the cases in which the receptor_host_identifier cannot be resolved
+# and thefore breaking the mesh
+- name: Validate if receptor peer name is DNS resolvable
+  register: _getent
+  command: getent hosts "{{ hostvars[item]['receptor_host_identifier'] }}"
+  when:
+    - item | default([]) | length
+    - hostvars[item]['node_state'] == 'active'
+    - item | regex_search(regexp_ip) == '' or item | regex_search(regexp_ip) == None
+    - hostvars[item]['receptor_host_identifier'] | default([]) | length
+  with_items:
+    - "{{ mesh[inventory_hostname]['peers'] }}"
+  vars:
+    regexp_ip: "^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$"
+  ignore_errors: true
+
+- name: Report error when a receptor node cannot resolve a connected peer name
+  fail:
+    msg:
+      "The node '{{ item['item'] }}' cannot resolve its peer '{{ item['cmd'][-1] }}'.
+      If you are using `routable_hostname`|`ansible_host`|`inventory_hostname` on your inventory,
+      make sure your system can resolve the name or replace it with it's related IP address to bypass resolution."
+  when:
+    - _getent.failed | default(False) | bool
+    - item.rc != 0
+  with_items:
+    - "{{ _getent.results }}"

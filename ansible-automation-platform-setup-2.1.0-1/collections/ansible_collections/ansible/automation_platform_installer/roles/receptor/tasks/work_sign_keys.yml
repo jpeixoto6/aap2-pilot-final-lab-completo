@@ -1,0 +1,82 @@
+---
+- name: Create Work signing keys
+  run_once: true
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname == groups['automationcontroller'][0]
+  block:
+    - name: Regenerate work sign keys (forced )
+      file:
+        dest: "{{ item }}"
+        state: absent
+      when: receptor_work_sign_reconfigure|bool
+      with_items:
+        - "{{ work_sign_public_keyfile }}"
+        - "{{ work_sign_private_keyfile }}"
+
+    - name: Generate Private RSA key for signing work
+      become: yes
+      become_user: receptor
+      command: openssl genrsa -out {{ work_sign_private_keyfile }} {{ receptor_tls_bits }}
+      args:
+        creates: "{{ work_sign_private_keyfile }}"
+
+    - name: Generate public RSA key for signing work
+      become: yes
+      become_user: receptor
+      command: openssl rsa -in {{ work_sign_private_keyfile }} -out {{ work_sign_public_keyfile }} -outform PEM -pubout
+      args:
+        creates: "{{ work_sign_public_keyfile }}"
+
+    - name: Fix permissions for signing keys
+      file:
+        path: "{{ item }}"
+        mode: 0640
+        owner: root
+        group: awx
+      with_items:
+        - "{{ work_sign_public_keyfile }}"
+        - "{{ work_sign_private_keyfile }}"
+
+    - name: Slurp work signing keys
+      slurp:
+        src: "{{ item }}"
+      register: signing_keys
+      no_log: true
+      with_items:
+        - "{{ work_sign_public_keyfile }}"
+        - "{{ work_sign_private_keyfile }}"
+
+- name: Distribute Work Sign keys to automationcontroller nodes
+  no_log: true
+  copy:
+    content: "{{ item['content'] | b64decode }}"
+    dest: "{{ item['source'] }}"
+    mode: 0640
+    owner: root
+    group: awx
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - hostvars[groups['automationcontroller'][0]]['signing_keys']['results'] | default([]) | length
+    - inventory_hostname in groups['automationcontroller']
+    - inventory_hostname != groups['automationcontroller'][0]
+  with_items:
+    - "{{ hostvars[groups['automationcontroller'][0]]['signing_keys']['results'] }}"
+
+- name: Distribute work sign public keys to all execution_nodes
+  no_log: true
+  copy:
+    content: "{{ item['content'] | b64decode }}"
+    dest: "{{ item['source'] }}"
+    mode: 0640
+    owner: receptor
+    group: receptor
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - hostvars[groups['automationcontroller'][0]]['signing_keys']['results'] | default([]) | length
+    - groups['execution_nodes'] | default([]) | length
+    - inventory_hostname in groups['execution_nodes']
+    - item['source'] == work_sign_public_keyfile
+    - node_type == 'execution'
+  with_items:
+    - "{{ hostvars[groups['automationcontroller'][0]]['signing_keys']['results'][0] }}"

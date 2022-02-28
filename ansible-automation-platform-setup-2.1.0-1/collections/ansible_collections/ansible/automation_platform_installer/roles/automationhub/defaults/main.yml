@@ -1,0 +1,15 @@
+---
+automationhub_disable_https: false
+automationhub_disable_hsts: false
+automationhub_ssl_validate_certs: false
+automationhub_require_content_approval: true
+automationhub_importer_settings: {}
+automationhub_upgrade: false
+automationhub_enable_api_access_log: false
+automationhub_enable_unauthenticated_collection_access: false
+automationhub_enable_unauthenticated_collection_download: false
+
+sso_automation_hub_client_id: automation-hub
+sso_automation_hub_client_name: 'Automation Hub'
+sso_automation_hub_client_admin_role: hubadmin
+sso_automation_hub_direct_access_enabled: yes

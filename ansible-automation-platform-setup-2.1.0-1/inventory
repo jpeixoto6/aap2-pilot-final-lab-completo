@@ -1,0 +1,18 @@
+[automationcontroller]
+
+
+[automationhub]
+hub.example.com
+
+[all:vars]
+ansible_become=true
+automationhub_admin_password= r3dh4t1!
+
+automationhub_pg_host=''
+automationhub_pg_port=''
+
+automationhub_pg_database='automationhub'
+automationhub_pg_username='automationhub'
+automationhub_pg_password=r3dh4t1!
+automationhub_pg_sslmode='prefer'
+

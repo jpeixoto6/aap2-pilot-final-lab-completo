@@ -1,0 +1,4 @@
+_registry_url: "{{ registry_url | default('registry.redhat.io') }}"
+
+_automation_platform_default_namespace: "{{ automation_platform_default_namespace | default('ansible-automation-platform-21') }}"
+_ee_image_base: "{{ ee_image_base | default(_registry_url + '/' + _automation_platform_default_namespace + '/') }}"

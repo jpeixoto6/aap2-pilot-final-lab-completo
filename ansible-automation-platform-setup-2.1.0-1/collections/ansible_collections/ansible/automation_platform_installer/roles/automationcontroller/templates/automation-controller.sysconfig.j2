@@ -1,0 +1,8 @@
+# The settings in this file are used by the automation-controller-service script.
+
+# List of services managed by automation controller (space-delimited).
+{% if awx_install_database == 'external' %}
+CONTROLLER_SERVICES="{{ awx_install_redis_init_name }} nginx supervisord receptor"
+{% else %}
+CONTROLLER_SERVICES="{{ awx_install_pg_init_name }} {{ awx_install_redis_init_name }} nginx supervisord receptor"
+{% endif %}

@@ -1,0 +1,83 @@
+---
+- name: 'include receptor variables'
+  include_vars: '{{ item }}'
+  with_first_found:
+    - files:
+        - 'main.yml'
+      paths:
+        - '../../receptor/defaults'
+
+- name: 'include redis variables'
+  include_vars: '{{ item }}'
+  with_first_found:
+    - files:
+        - 'default.yml'
+      paths:
+        - '../../redis/vars/'
+
+- name: 'include packages_el variables'
+  include_vars: '{{ item }}'
+  with_first_found:
+    - files:
+        - 'main.yml'
+      paths:
+        - '../../packages_el/defaults'
+
+- name: Show deprovision warning disclaimer
+  pause:
+    prompt: >
+      "You are about to deprovision the following nodes: '{{ deprovision_nodes | join(', ') }}'
+      Please type 'PROCEED' if you want to continue?"
+  run_once: true
+  register: deprovision_proceed
+  when: deprovision_disclaimer | bool
+
+- name: Ensure that user accepted the deprovision terms
+  assert:
+    that:
+      - deprovision_proceed.user_input == 'PROCEED'
+    fail_msg: "You must type PROCEED to acknowledge the nodes deprovision"
+    success_msg: "Continuing with deprovisioning"
+    quiet: true
+  when: deprovision_disclaimer | bool
+
+- name: Deprovision node instance from the database.
+  shell: awx-manage deprovision_instance --hostname="{{ receptor_host_identifier }}"
+  args:
+    executable: /bin/bash
+  become_user: awx
+  become: True
+  register: deprovision_node
+  changed_when: "'changed: True' in deprovision_node.stdout"
+  delegate_to: "{{ groups['automationcontroller'][0] }}"
+
+- name: Determine if {{ receptor_package_name }} RPM is installed
+  command: rpm -qa {{ receptor_package_name }}
+  register: receptor_installed
+  changed_when: receptor_installed.stdout_lines | length > 0
+
+- name: Determine if {{ packages_el_tower_package_name }} RPM is installed
+  command: rpm -qa {{ packages_el_tower_package_name }}
+  register: controller_installed
+  changed_when: controller_installed.stdout_lines | length > 0
+  when: inventory_hostname in groups['automationcontroller']
+
+- name: Determine if Nginx RPM is installed
+  command: rpm -qa {{ nginx_package_name }}
+  register: nginx_installed
+  changed_when: nginx_installed.stdout_lines | length > 0
+  when: inventory_hostname in groups['automationcontroller']
+
+- name: Deprovision Receptor
+  include_tasks: receptor.yml
+  when: receptor_installed is changed
+
+- name: Deprovision Automation Controller
+  include_tasks: controller.yml
+  when: >
+    inventory_hostname in groups['automationcontroller'] and
+    controller_installed.changed | default(False) | bool
+
+- name: Deprovision Nginx
+  include_tasks: nginx.yml
+  when: nginx_installed is changed

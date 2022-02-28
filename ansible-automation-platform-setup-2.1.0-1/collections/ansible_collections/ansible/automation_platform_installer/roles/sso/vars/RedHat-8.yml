@@ -1,0 +1,3 @@
+---
+redhat_jboss_rhsm_repo: 'jb-eap-7.3-for-rhel-8-x86_64-rpms'
+redhat_sso_rhsm_repo: 'rh-sso-7.4-for-rhel-8-x86_64-rpms'

@@ -1,0 +1,34 @@
+---
+- name: Create the default organization if it is needed.
+  shell: awx-manage create_preload_data
+  register: preload_data_created
+  changed_when: "'added' in preload_data_created.stdout"
+  when:
+    - create_preload_data|bool
+    - inventory_hostname == groups['automationcontroller'][0]
+
+- name: Create the default execution environments if needed (without authentication).
+  shell: awx-manage register_default_execution_environments
+  register: result
+  changed_when: "'changed: True' in result.stdout"
+  when:
+    - inventory_hostname == groups['automationcontroller'][0]
+    - registry_username is not defined
+
+- name: Create the default execution environments if needed (with authentication).
+  shell: |
+    awx-manage register_default_execution_environments \
+    --registry-username=$REGISTRY_USERNAME \
+    --registry-password=$REGISTRY_PASSWORD \
+    --registry-url=$REGISTRY_URL \
+    --verify-ssl=$REGISTRY_VERIFY_SSL
+  register: result
+  changed_when: "'changed: True' in result.stdout"
+  environment:
+    REGISTRY_USERNAME: "{{registry_username}}"
+    REGISTRY_PASSWORD: "{{registry_password}}"
+    REGISTRY_URL: "{{_registry_url}}"
+    REGISTRY_VERIFY_SSL: "{{registry_verify_ssl | default(True) | bool}}"
+  when:
+    - inventory_hostname == groups['automationcontroller'][0]
+    - registry_username is defined

@@ -1,0 +1,16 @@
+---
+servicescatalog_controller_validate_certs: true
+unwanted_worker_packages:
+  - rhc-worker-playbook
+system_cert_file: "/etc/pki/consumer/cert.pem"
+system_key_file: "/etc/pki/consumer/key.pem"
+rhc_config_dir: "/etc/rhc"
+catalog_config_dir: "{{ rhc_config_dir }}/workers"
+rhc_service_config_dir: "/etc/systemd/system/rhcd.service.d"
+log_level: "error"
+mqtt_broker: "wss://connect.cloud.redhat.com:443"
+topic_prefix: "redhat/insights"
+servicescatalog_http_proxy: ""
+servicescatalog_https_proxy: ""
+# no_proxy defines ip addresses for which we should not use the proxy
+servicescatalog_no_proxy: ""

@@ -1,0 +1,1 @@
+GALAXY_IGNORE_CERTS = {{ ( groups['automationhub'] | default([]) | length and custom_ca_cert is not defined ) | ternary(True, False) }}

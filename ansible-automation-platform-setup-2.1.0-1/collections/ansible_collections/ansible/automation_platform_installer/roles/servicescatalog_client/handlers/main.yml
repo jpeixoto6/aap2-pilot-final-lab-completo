@@ -1,0 +1,5 @@
+---
+- name: restart-rhcd
+  systemd:
+    name: rhcd
+    state: restarted

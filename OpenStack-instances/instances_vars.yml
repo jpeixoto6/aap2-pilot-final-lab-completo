@@ -1,0 +1,21 @@
+---
+instances:
+  - name: server1
+    keypair: "{{ guid }}-keypair"
+    image: rhel-8.3
+    flavor: GLOBAL-CPU_4_Memory_8192_Disk_30_flavor
+    security_group: "{{ guid }}-HostSG"
+    internal_network: "{{ guid }}-dev-network"
+    metadata:
+      AnsibleGroup: osp_instances
+      deployment_name: dev
+
+  - name: server2
+    keypair: "{{ guid }}-keypair"
+    image: rhel-8.3
+    flavor: GLOBAL-CPU_4_Memory_8192_Disk_30_flavor
+    security_group: "{{ guid }}-HostSG"
+    internal_network: "{{ guid }}-dev-network"
+    metadata:
+      AnsibleGroup: osp_instances
+      deployment_name: dev

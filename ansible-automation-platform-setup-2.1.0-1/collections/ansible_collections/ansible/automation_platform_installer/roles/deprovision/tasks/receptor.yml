@@ -1,0 +1,31 @@
+---
+- name: Stop and disable receptor service
+  systemd:
+    name: "{{ receptor_package_name }}"
+    state: stopped
+    enabled: no
+
+- name: Remove Receptor related RPMs
+  shell: rpm -e {{ item }}
+  ignore_errors: true
+  with_items: "{{ receptor_cleanup_rpm_list }}"
+
+- name: Cleanup Receptor files
+  file:
+    dest: "{{ item }}"
+    state: absent
+  with_items:
+    - "{{ receptor_cleanup_files_list }}"
+
+- name: Remove receptor user
+  user:
+    name: receptor
+    state: absent
+    remove: yes
+
+- name: Remove awx user
+  user:
+    name: awx
+    state: absent
+    remove: yes
+  when: inventory_hostname in groups['execution_nodes']

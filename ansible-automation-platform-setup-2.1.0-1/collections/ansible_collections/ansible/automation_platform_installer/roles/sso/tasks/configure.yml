@@ -1,0 +1,35 @@
+- name: Ensure sso_console_admin_username and sso_console_admin_password are set
+  fail:
+    msg: "sso_console_admin_username and sso_console_admin_password must be set"
+  when: not sso_console_admin_username | default('') | length or not sso_console_admin_password | default('') | length
+
+- name: Ensure SSO host is set
+  fail:
+    msg: "SSO host must be set"
+  when: not sso_host | default('') | length
+
+- include_tasks: init.yml
+
+- name: Create SSO token
+  uri:
+    url: "{{ sso_api_url_base }}/realms/master/protocol/openid-connect/token"
+    method: POST
+    body_format: form-urlencoded
+    body:
+      grant_type: "password"
+      client_id: 'admin-cli'
+      username: '{{ sso_console_admin_username }}'
+      password: '{{ sso_console_admin_password }}'
+    validate_certs: false
+  no_log: true
+  register: sso_token_result
+
+- set_fact:
+    sso_token: '{{ sso_token_result.json.access_token }}'
+  no_log: true
+
+- name: Configure realm
+  include_tasks: configure_realm.yml
+
+- name: Configure client
+  include_tasks: configure_client.yml

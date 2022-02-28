@@ -1,0 +1,60 @@
+---
+deprovision_disclaimer: true
+
+# list of receptor related RPMs
+receptor_cleanup_rpm_list:
+  - "{{ receptor_dependencies_list }}"
+  - ansible-runner
+
+# list of receptor files/directories to be removed
+receptor_cleanup_files_list:
+  - /etc/security/limits.d/awx.conf
+  - /etc/systemd/system/receptor.service.d
+  - /etc/receptor
+  - /etc/tmpfiles.d/awx-receptor.conf
+  - /etc/tmpfiles.d/receptor.conf
+  - /tmp/receptor
+  - /var/run/receptor
+  - /var/run/awx-receptor
+  - /var/lib/receptor
+  - /var/lib/awx
+
+# list of controller related RPMs
+controller_cleanup_rpm_list:
+  - automation-controller-venv-tower
+  - automation-controller-server
+  - automation-controller-ui
+  - automation-controller
+
+# list of controller files/directories to be removed
+controller_cleanup_files_list:
+  - /etc/tower
+  - /etc/security/limits.d/awx.conf
+  - /etc/tmpfiles.d/tower.conf
+  - /etc/logrotate.d/awx_supervisord
+  - /etc/supervisord.d/tower.ini
+  - /var/lib/awx
+  - /var/log/tower
+  - /var/run/awx-rsyslog
+
+controller_services_list:
+  - "{{ packages_el_tower_package_name }}"
+  - supervisord
+  - nginx
+  - "{{  redis_init_name }}"
+
+# list of isolated_node related RPMs
+isolated_node_cleanup_rpm_list:
+  - ansible-tower-venv-ansible
+  - ansible-tower-isolated
+  - ansible-runner
+  - ansible
+  - bubblewrap
+  - python3-docutils
+  - python3-daemon
+  - python3-ansible-runner
+
+isolated_node_cleanup_file_list:
+  - /var/lib/awx
+
+nginx_package_name: "nginx"

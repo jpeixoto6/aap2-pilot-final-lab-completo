@@ -1,0 +1,15 @@
+controller_firewall_type: none
+
+controller_firewall_ports:
+  - "{{ firewalld_http_port }}"
+  - "{{ firewalld_https_port }}"
+
+database_firewall_ports:
+  - "{{ pg_port }}"
+
+controller_firewalld_zone: public
+
+receptor_listener_port: 27199
+receptor_listener_protocol: tcp
+receptor_firewall_ports:
+  - "{{ receptor_listener_port }}"

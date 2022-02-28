@@ -1,0 +1,56 @@
+---
+- name: Cleanup any stale backup restore version
+  file:
+    path: '{{ backup_dir.rstrip("/") }}/common/version'
+    state: absent
+  ignore_errors: true
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname == groups['automationcontroller'][0]
+
+- name: controller | Acquire installed version.
+  shell: awx-manage version >> {{ backup_dir.rstrip("/") }}/common/version
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname == groups['automationcontroller'][0]
+
+- name: controller | Create a directory for configuration files.
+  file:
+    path: '{{ backup_dir.rstrip("/") }}/{{ now }}/conf/'
+    group: root
+    mode: 0700
+    owner: root
+    state: directory
+  when:
+    - inventory_hostname in groups['automationcontroller'] | default([])
+
+- name: controller | Copy configuration files from conf.d.
+  shell: rsync --exclude=SECRET_KEY --exclude=conf.d/postgres.py --exclude=conf.d/channels.py --exclude=conf.d/caching.py -auq /etc/tower/ {{ backup_dir.rstrip("/") }}/{{ now }}/conf/
+  when:
+    - inventory_hostname in groups['automationcontroller'] | default([])
+
+- name: controller | Copy common files from configuration
+  shell: rsync  -auq /etc/tower/SECRET_KEY {{ backup_dir.rstrip("/") }}/common/
+  when:
+    - groups['automationcontroller'] | default([]) | length
+    - inventory_hostname == groups['automationcontroller'][0]
+
+- block:
+    - name: Slurp pulp settings file
+      slurp:
+        src: /etc/pulp/settings.py
+      register: pulp_settings
+
+    - set_fact:
+        keycloak_secret: "{{ pulp_settings['content'] | b64decode | regex_search('SOCIAL_AUTH_KEYCLOAK_SECRET = \".+\"') }}"
+        keycloak_key: "{{ pulp_settings['content'] | b64decode | regex_search('SOCIAL_AUTH_KEYCLOAK_PUBLIC_KEY = \".+\"') }}"
+      no_log: true
+
+    - name: Save to keycloak_settings file
+      copy:
+        dest: '{{ backup_dir.rstrip("/") }}/automationhub/automationhub/keycloak_settings'
+        content: "{{ keycloak_secret }}\n{{ keycloak_key }}"
+      no_log: true
+  when:
+    - inventory_hostname in groups['automationhub'] | default([])
+    - groups['sso'] | default([]) | length

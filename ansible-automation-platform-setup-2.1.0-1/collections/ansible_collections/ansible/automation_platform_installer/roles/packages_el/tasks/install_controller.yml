@@ -1,0 +1,13 @@
+---
+- name: Clean Yum Cache for the Automation Platform Repo
+  command: "yum clean all"
+
+- name: Install the Automation Controller RPM.
+  yum:
+    name: '{{controller_rpm}}'
+    update_cache: yes
+    state: latest
+  notify:
+    - start PostgreSQL
+    - restart nginx
+    - restart supervisor

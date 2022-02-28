@@ -1,0 +1,23 @@
+ansible-navigator:
+  ansible:
+    playbook: provision.yml
+  app: run
+  execution-environment:
+    image: ee-osp:1.2.0
+    pull-policy: missing
+    volume-mounts:
+      - src: "/etc/openstack/clouds.yaml"
+        dest: "/etc/openstack/clouds.yaml"
+        label: "Z"
+    environment-variables:
+      pass:
+        - GUID
+  mode: stdout
+  logging:
+    append: False
+    level: critical
+    file: /tmp/OpenStack-instances/ansible-navigator.log
+  playbook-artifact:
+    enable: True
+    replay: /tmp/OpenStack-instances/artifact.json
+    save-as: /tmp/OpenStack-instances/artifact.json

@@ -1,0 +1,126 @@
+---
+- name: Set the application and token name
+  set_fact:
+    servicescatalog_controller_app_name: "Services Catalog - {{ servicescatalog_controller_user }}"
+
+- name: Retrieve install uuid
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/ping
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    force_basic_auth: true
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+  register: _install_info
+  no_log: true
+
+- name: Retrieve User Info
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/me
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    force_basic_auth: true
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+  register: _user_info
+  no_log: true
+
+- name: Retrieve User Organization Info
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/users/{{ _user_info.json.results[0].id }}/organizations
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    force_basic_auth: true
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+  register: _org_info
+  no_log: true
+
+- name: Set org id when user is not admin
+  set_fact:
+    _org_id: '{{ _org_info.json.results[0].id }}'
+  when: _org_info.json.results | length
+
+- name: Set org id to 1 when user is admin
+  set_fact:
+    _org_id: '1'
+  when: not _org_info.json.results | length
+
+- name: Store the install and organisation uuid value
+  set_fact:
+    _servicescatalog_controller_uuid: '{{ _install_info.json.install_uuid + _org_id | to_uuid }}'
+
+- name: Retrieve application
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/applications/
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    force_basic_auth: true
+    follow_redirects: true
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+  register: _applications
+  no_log: true
+
+- name: Generate application (if not created)
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/applications/
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    method: POST
+    force_basic_auth: true
+    follow_redirects: true
+    body_format: json
+    body:
+      name: '{{ servicescatalog_controller_app_name }}'
+      description: '{{ servicescatalog_controller_app_name }}'
+      client_type: confidential
+      authorization_grant_type: password
+      organization: '{{ _org_id | int }}'
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+    status_code: 201
+  register: _application_info
+  no_log: true
+  when:
+    - not _applications.json.results | selectattr("name", "equalto", servicescatalog_controller_app_name) | list | length
+
+- name: Retrieve token
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/users/{{ _user_info.json.results[0].id }}/tokens/
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    force_basic_auth: true
+    follow_redirects: true
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+  register: _tokens
+  no_log: true
+
+- name: Generate token (if not created)
+  uri:
+    url: https://{{ _servicescatalog_controller_hostname }}/api/v2/users/{{ _user_info.json.results[0].id }}/tokens/
+    user: '{{ servicescatalog_controller_user }}'
+    password: '{{ servicescatalog_controller_password }}'
+    method: POST
+    force_basic_auth: true
+    follow_redirects: true
+    body_format: json
+    body:
+      description: Services Catalog - {{ servicescatalog_controller_user }}
+      scope: write
+      application: '{{ _application_info.json.id }}'
+    validate_certs: '{{ servicescatalog_controller_validate_certs | bool }}'
+    status_code: 201
+  register: _token_info
+  no_log: true
+  when:
+    - not _tokens.json.results | selectattr("description", "equalto", servicescatalog_controller_app_name) | list | length
+
+- name: Store the token value
+  set_fact:
+    _servicescatalog_controller_token: '{{ _token_info.json.token }}'
+  no_log: true
+  when:
+    - not _tokens.json.results | selectattr("description", "equalto", servicescatalog_controller_app_name) | list | length
+
+- name: Store the token value
+  set_fact:
+    _servicescatalog_controller_token: '************'
+  no_log: true
+  when:
+    - _tokens.json.results | selectattr("description", "equalto", servicescatalog_controller_app_name) | list | length

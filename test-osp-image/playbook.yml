@@ -1,0 +1,16 @@
+---
+- name: Test Custom EE
+  hosts: localhost
+  gather_facts: false
+  vars:
+    guid: "{{ lookup('env', 'GUID')}}"
+  tasks:
+    - name: Collect OpenStack instances info
+      openstack.cloud.server_info:
+        cloud: "{{ guid }}-project"
+        server: "*"
+      register: output
+
+    - name: Print output
+      debug:
+        var: output

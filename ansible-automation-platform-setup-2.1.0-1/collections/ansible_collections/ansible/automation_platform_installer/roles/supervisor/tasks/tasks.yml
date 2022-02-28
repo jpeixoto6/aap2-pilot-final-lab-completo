@@ -1,0 +1,33 @@
+---
+- name: install supervisor config
+  template:
+    src: 'tower.conf.j2'
+    dest: '/etc/supervisord.d/tower.ini'
+    force: yes
+  notify:
+    - restart supervisor
+
+- name: Override supervisord logrotate rules
+  copy:
+    src: files/supervisor_logrotate
+    dest: /etc/logrotate.d/supervisor
+    owner: root
+    group: root
+    mode: '0644'
+
+# This is necessary due to an error where awx did not have permission to read
+# /var/run/supervisor. Telling systemd to recreate its tmp files fixes this.
+- name: Recreate systemd tmp files
+  command: systemd-tmpfiles --create
+
+- name: start/enable supervisord process
+  service:
+    name: 'supervisord'
+    state: started
+    enabled: yes
+
+- name: Wait for the supervisor socket
+  wait_for:
+    path: '/var/run/supervisor/supervisor.sock'
+    timeout: 30
+

@@ -1,0 +1,79 @@
+---
+- name: Ensure sso_console_admin_username and sso_console_admin_password are set
+  fail:
+    msg: "sso_console_admin_username and sso_console_admin_password must be set"
+  when: not sso_console_admin_username | default('') | length or not sso_console_admin_password | default('') | length
+
+- include_vars: '{{ ansible_os_family }}-{{ ansible_distribution_major_version }}.yml'        # RedHat-8
+
+- name: Ensure repos are available
+  shell: 'dnf repolist --enablerepo={{ redhat_jboss_rhsm_repo }},{{ redhat_sso_rhsm_repo }}'
+
+- name: Install RH-SSO
+  dnf:
+    name: '@{{ sso_app_name }}'
+    enablerepo: "{{ redhat_jboss_rhsm_repo }},{{ redhat_sso_rhsm_repo }}"
+    state: present
+
+- name: Create SSO admin user for console access
+  shell: ./add-user-keycloak.sh -u '{{ sso_console_admin_username }}' -p '{{ sso_console_admin_password }}'
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  ignore_errors: true
+  no_log: true
+  register: create_sso_admin_user
+
+- set_fact:
+    sso_user_exist_msg: "'{{ sso_console_admin_username }}' already added"
+
+- name: Check if SSO console admin user was created successfully
+  fail:
+    msg: "Failed to create SSO console admin user: {{ create_sso_admin_user.stderr }}"
+  when:
+    - create_sso_admin_user.failed
+    - not create_sso_admin_user.stderr is search(sso_user_exist_msg)
+
+- set_fact:
+    sso_host: '{{ ansible_host | default(inventory_hostname) }}'
+
+- name: Copy realm theme files
+  copy:
+    src: '{{ sso_automation_platform_login_theme }}/'
+    dest: '{{ sso_home_dir }}/themes/{{ sso_automation_platform_login_theme | basename }}'
+
+- name: Check if sso.uuid file exists
+  stat:
+    path: /etc/ansible-automation-platform/sso.uuid
+  register: sso_uuid_file
+
+- block:
+    - name: Ensure /etc/ansible-automation-platform directory exists
+      file:
+        path: /etc/ansible-automation-platform
+        state: directory
+        mode: 0755
+
+    - name: Generate UUID
+      command: uuidgen
+      register: uuidgen_result
+
+    - name: Create sso.uuid file
+      copy:
+        content: '{{ uuidgen_result.stdout }}'
+        dest: /etc/ansible-automation-platform/sso.uuid
+  when: not sso_uuid_file.stat.exists
+
+- name: Start SSO server
+  service:
+    name: '{{ sso_app_name }}'
+    enabled: yes
+    state: restarted
+
+- name: Wait for SSO server to start
+  shell: '{{ sso_home_dir }}/bin/jboss-cli.sh -c --commands="/deployment=keycloak-server.war:read-attribute(name=status)"'
+  register: result
+  until: result.rc == 0
+  retries: 10
+  delay: 15
+
+- include_tasks: setup_ssl.yml

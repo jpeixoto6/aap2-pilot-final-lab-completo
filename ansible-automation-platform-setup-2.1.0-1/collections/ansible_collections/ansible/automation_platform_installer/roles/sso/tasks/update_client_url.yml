@@ -1,0 +1,17 @@
+---
+- include_tasks: init.yml
+
+- name: Update {{ sso_client_id }} client
+  keycloak_client:
+    auth_client_id: admin-cli
+    auth_keycloak_url: '{{ sso_api_url_base }}'
+    auth_realm: master
+    auth_username: '{{ sso_console_admin_username }}'
+    auth_password: '{{ sso_console_admin_password }}'
+    client_id: '{{ sso_client_id }}'
+    realm: '{{ sso_automation_platform_realm }}'
+    redirect_uris:
+      - '{{ sso_client_redirect_uri }}'
+    validate_certs: false
+    web_origins:
+      - '{{ sso_client_web_origins }}'

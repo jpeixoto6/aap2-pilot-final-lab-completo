@@ -1,0 +1,36 @@
+---
+- name: Stop SSO server
+  service:
+    name: '{{ sso_app_name }}'
+    enabled: yes
+    state: stopped
+
+- name: Delete database
+  file:
+    path: '{{ sso_home_dir }}/standalone/data/keycloak.mv.db'
+    state: absent
+
+- name: Import H2 database
+  command: java -cp modules/system/layers/base/com/h2database/h2/main/h2.jar org.h2.tools.RunScript -url jdbc:h2:./standalone/data/keycloak -user sa -password sa -script {{ backup_dir.rstrip("/") }}/restore/sso.db.zip -options compression zip
+  args:
+    chdir: '{{ sso_home_dir }}'
+
+- name: Set permission for database
+  file:
+    mode: 0644
+    owner: jboss
+    group: jboss
+    path: '{{ sso_home_dir }}/standalone/data/keycloak.mv.db'
+
+- name: Start SSO server
+  service:
+    name: '{{ sso_app_name }}'
+    enabled: yes
+    state: started
+
+- name: Wait for SSO server to start
+  shell: '{{ sso_home_dir }}/bin/jboss-cli.sh -c --commands="/deployment=keycloak-server.war:read-attribute(name=status)"'
+  register: result
+  until: result.rc == 0
+  retries: 10
+  delay: 15

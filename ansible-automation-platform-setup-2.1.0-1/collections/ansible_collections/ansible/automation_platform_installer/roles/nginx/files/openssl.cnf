@@ -1,0 +1,22 @@
+oid_section = aap_oids
+
+[req]
+default_bits = 2048
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[aap_oids]
+installer = 1.1.1.1
+
+[req_distinguished_name]
+commonName = localhost
+installer = Ansible Automation Platform
+
+[v3_req]
+keyUsage = keyEncipherment, digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost

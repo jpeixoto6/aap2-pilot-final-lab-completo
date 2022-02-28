@@ -1,0 +1,24 @@
+---
+- name: Ensure rsync is installed
+  dnf:
+    name: rsync
+    state: present
+
+- include_tasks: init.yml
+
+- include_tasks: projects.yml
+  when:
+    - inventory_hostname in groups['automationcontroller'] | default([])
+
+- include_tasks: conf.yml
+
+- include_tasks: sso.yml
+  when:
+    - inventory_hostname in groups['sso'] | default([])
+
+- include_tasks: automationhub.yml
+  when:
+    - groups['automationhub'] | default([]) | length
+    - inventory_hostname == groups['automationhub'][0]
+
+- include_tasks: postgres.yml

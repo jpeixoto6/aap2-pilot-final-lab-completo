@@ -1,0 +1,65 @@
+---
+- name: Install galaxy UI from source
+  block:
+    - name: Install NPM (distro-agnostic)
+      package:
+        name: npm
+        state: present
+      retries: "{{ pulp_devel_package_retries }}"
+      register: result
+      until: result is succeeded
+
+    - name: Check if UI is installed
+      stat:
+        path: '{{ developer_user_home }}/devel/ansible-hub-ui'
+      register: is_hub_installed
+
+    - block:
+        - name: Cloning Ansible Hub UI
+          git:
+            repo: 'https://github.com/ansible/ansible-hub-ui.git'
+            dest: '{{ developer_user_home }}/devel/ansible-hub-ui'
+            force: yes
+            version: master
+            update: yes
+          register: ansible_hub_ui_git
+          when: not is_hub_installed.stat.exists
+          tags:
+            - molecule-idempotence-notest
+
+        - name: Install packages based on package.json
+          npm:
+            path: '{{ developer_user_home }}/devel/ansible-hub-ui'
+
+        - name: Building Ansible Hub UI
+          command: npm run build-standalone
+          args:
+            chdir: '{{ developer_user_home }}/devel/ansible-hub-ui'
+          when:
+            - is_hub_installed.stat.exists or ansible_hub_ui_git is defined
+            - is_hub_installed.stat.exists or ansible_hub_ui_git.changed
+
+        - name: Creates galaxy_ng static dir
+          file:
+            path: '{{ pulp_install_plugins["galaxy-ng"]["source_dir"] }}/galaxy_ng/app/static/galaxy_ng'
+            state: directory
+
+        - name: Copying Ansible Hub UI to galaxy_ng static dir
+          copy:
+            src: '{{ developer_user_home }}/devel/ansible-hub-ui/dist/'
+            dest: '{{ pulp_install_plugins["galaxy-ng"]["source_dir"] }}/galaxy_ng/app/static/galaxy_ng'
+            group: '{{ pulp_group }}'
+            remote_src: yes
+      become: yes
+      become_user: '{{ pulp_user }}'
+
+
+  when: __galaxy_ui_source is defined and __galaxy_ui_source == "source"
+
+- name: Download galaxy ui from github
+  command:
+    cmd: "{{ pulp_install_dir }}/bin/python setup.py prepare_static --force-download-ui"
+    chdir: '{{ pulp_install_plugins["galaxy-ng"]["source_dir"] }}'
+  when: __galaxy_ui_source is not defined or __galaxy_ui_source == "precompiled"
+  tags:
+    - molecule-idempotence-notest

@@ -1,0 +1,57 @@
+---
+- name: Calculate Mesh Topology
+  calculate_mesh:
+    generate_dot_file: "{{ generate_dot_file | default(omit) }}"
+  register: _mesh
+  run_once: true
+
+- name: Review Mesh dot graph topology
+  pause:
+    prompt: >
+      "Receptor Mesh dot graph topology generated successfully. You can review its file located at '{{ generate_dot_file }}'.
+      You might want to abort the installation process now if you desire to review the dot graph file prior to proceding with the installation.
+      You can also generate this graph **only** by invoking the installer with the `--tag generate_dot_file` "
+    seconds: 15
+  when: generate_dot_file | default([]) | length
+
+- name: Store Receptor Mesh metadata
+  set_fact:
+    mesh: "{{ _mesh.mesh }}"
+    mesh_groups: "{{ _mesh.mesh_groups }}"
+  run_once: true
+
+- name: Store Receptor Deprovision Mesh metadata
+  set_fact:
+    deprovision_mesh: "{{ _mesh.deprovision_mesh }}"
+    deprovision_nodes: "{{ _mesh.deprovision_mesh.keys() }}"
+  run_once: true
+
+- name: Define receptor mesh facts
+  set_fact:
+    control_service_name: "{{ mesh[inventory_hostname]['receptor_control_service_name'] }}"
+    control_filename: "{{ mesh[inventory_hostname]['receptor_control_filename'] }}"
+    node_type: "{{ mesh[inventory_hostname]['node_type'] }}"
+    node_state: "{{ mesh[inventory_hostname]['node_state'] }}"
+    log_level: "{{ mesh[inventory_hostname]['receptor_log_level'] }}"
+    listener: "{{ mesh[inventory_hostname]['receptor_listener'] }}"
+    listener_protocol: "{{ mesh[inventory_hostname]['receptor_listener_protocol'] }}"
+    listener_port: "{{ mesh[inventory_hostname]['receptor_listener_port'] }}"
+    run_receptor_as: "awx"
+    receptor_socket_dir: '/var/run/awx-receptor'
+  when:
+    - mesh is defined
+    - mesh.keys() | default([]) | length
+    - inventory_hostname in mesh.keys()
+
+- name: Define receptor deprovision mesh facts
+  set_fact:
+    control_service_name: "{{ deprovision_mesh[inventory_hostname]['receptor_control_service_name'] }}"
+    control_filename: "{{ deprovision_mesh[inventory_hostname]['receptor_control_filename'] }}"
+    node_state: "{{ deprovision_mesh[inventory_hostname]['node_state'] }}"
+    log_level: "{{ deprovision_mesh[inventory_hostname]['receptor_log_level'] }}"
+    listener_protocol: "{{ deprovision_mesh[inventory_hostname]['receptor_listener_protocol'] }}"
+    listener_port: "{{ deprovision_mesh[inventory_hostname]['receptor_listener_port'] }}"
+  when:
+    - deprovision_mesh is defined
+    - deprovision_mesh.keys() | default([]) | length
+    - inventory_hostname in deprovision_mesh.keys()

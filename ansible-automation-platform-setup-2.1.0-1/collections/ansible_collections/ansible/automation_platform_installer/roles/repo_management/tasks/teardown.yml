@@ -1,0 +1,12 @@
+---
+- name: Disable Automation Platform repository
+  command: dnf config-manager --disable {{ extra_repos }}
+  become: true
+  when: extra_repos is defined
+
+- name: Disable Automation Platform RHSM repository
+  command: subscription-manager repos --disable '{{ redhat_automation_platform_rhsm_repo }}'
+  become: true
+  when:
+    - aap_rhsm_repo_enable is succeeded
+    - aap_rhsm_repo_enable is not skipped

@@ -1,0 +1,79 @@
+---
+- name: Ensure custom SSL Certificate Authority files were provided
+  assert:
+    quiet: true
+    that:
+      - mesh_ca_certfile | default('') | length
+      - mesh_ca_keyfile | default('') | length
+    fail_msg: >
+      "You must provide both 'mesh_ca_certfile' and 'mesh_ca_keyfile' parameters."
+  when:
+    - mesh_ca_certfile is defined or mesh_ca_keyfile is defined
+
+- name: Ensure custom SSL Certificate Authority files matches
+  when:
+    - mesh_ca_certfile is defined
+    - mesh_ca_keyfile is defined
+  block:
+    - name: Verify custom node SSL private key
+      delegate_to: localhost
+      command: openssl rsa -modulus -noout -in "{{ mesh_ca_keyfile }}"
+      no_log: true
+      register: _mesh_ca_keyfile_md5sum
+
+    - name: Verify custom node SSL x509 key
+      delegate_to: localhost
+      command: openssl x509 -modulus -noout -in "{{ mesh_ca_certfile }}"
+      no_log: true
+      register: _mesh_ca_certfile_md5sum
+
+    - name: Ensure custom SSL pair matches
+      assert:
+        quiet: true
+        that:
+          - _mesh_ca_keyfile_md5sum.stdout == _mesh_ca_certfile_md5sum.stdout
+        fail_msg: >
+          "SSL !modulus! for {{ mesh_ca_keyfile}} and {{ mesh_ca_certfile }} don't match."
+        success_msg: "SSL !modulus! for {{ mesh_ca_keyfile}} and {{ mesh_ca_certfile }} match"
+
+- name: Ensure custom node SSL files are valid when provided
+  assert:
+    quiet: true
+    that:
+      - mesh_node_certfile | default('') | length
+      - mesh_node_keyfile | default('') | length
+      - mesh_ca_certfile is defined
+      - mesh_ca_keyfile is defined
+    fail_msg: >
+      "You must provide both 'mesh_node_crt' and 'mesh_node_key' parameters."
+  when: mesh_node_certfile is defined or mesh_node_keyfile is defined
+
+- name: Ensure custom node SSL files matches
+  when:
+    - mesh_node_certfile is defined
+    - mesh_node_keyfile is defined
+  block:
+    - name: Verify custom node SSL private key
+      delegate_to: localhost
+      command: openssl rsa -modulus -noout -in "{{ mesh_node_keyfile }}"
+      no_log: true
+      register: _mesh_node_keyfile_md5sum
+
+    - name: Verify custom node SSL x509 key
+      delegate_to: localhost
+      command: openssl x509 -modulus -noout -in "{{ mesh_node_certfile }}"
+      no_log: true
+      register: _mesh_node_certfile_md5sum
+
+    - name: Ensure custom SSL pair matches
+      assert:
+        quiet: true
+        that:
+          - _mesh_node_keyfile_md5sum.stdout == _mesh_node_certfile_md5sum.stdout
+        fail_msg: >
+          "SSL !modulus! for {{ mesh_node_keyfile}} and {{ mesh_node_certfile }} don't match."
+        success_msg: "SSL !modulus! for {{ mesh_node_keyfile}} and {{ mesh_node_certfile }} match"
+
+    - name: Ensure x509 certificate was signed by the expected Certificate Authority
+      delegate_to: localhost
+      command: openssl verify -CAfile "{{ mesh_ca_certfile }}" "{{ mesh_node_certfile }}"

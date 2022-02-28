@@ -1,0 +1,14 @@
+---
+sso_home_dir: /opt/rh/rh-sso7/root/usr/share/keycloak
+sso_app_name: rh-sso7
+
+sso_http_port: 8080
+sso_https_port: 8443
+sso_use_https: true
+sso_keystore_name: ansible-automation-platform
+
+sso_console_admin_username: admin
+
+sso_automation_platform_realm: ansible-automation-platform
+sso_automation_platform_realm_displayname: Ansible Automation Platform
+sso_automation_platform_login_theme: ansible-automation-platform

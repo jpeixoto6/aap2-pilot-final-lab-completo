@@ -1,0 +1,41 @@
+---
+- block:
+    - name: controller | Ensure that /etc/tower/ exists.
+      file:
+        group: root
+        mode: 0755
+        owner: root
+        path: /etc/tower/
+        state: directory
+
+    - name: controller | Copy configuration files into /etc/tower/.
+      shell: rsync -aq {{ backup_dir.rstrip("/") }}/restore/conf/ /etc/tower/
+      when: has_host_archive | bool
+
+    - name: controller | Write SECRET_KEY into /etc/tower/
+      shell: rsync -aq {{ backup_dir.rstrip("/") }}/restore/SECRET_KEY /etc/tower/
+
+  when:
+    - inventory_hostname in groups['automationcontroller'] | default([])
+
+- block:
+    - name: Slurp keycloak settings file
+      slurp:
+        src: '{{ backup_dir.rstrip("/") }}/restore/automationhub/keycloak_settings'
+      register: keycloak_settings
+      no_log: true
+
+    - name: Update keycloak secret
+      lineinfile:
+        path: /etc/pulp/settings.py
+        regexp: '^SOCIAL_AUTH_KEYCLOAK_SECRET ='
+        line: "{{ keycloak_settings['content'] | b64decode | regex_search('SOCIAL_AUTH_KEYCLOAK_SECRET = \".+\"') }}"
+
+    - name: Update keycloak public key
+      lineinfile:
+        path: /etc/pulp/settings.py
+        regexp: '^SOCIAL_AUTH_KEYCLOAK_PUBLIC_KEY ='
+        line: "{{ keycloak_settings['content'] | b64decode | regex_search('SOCIAL_AUTH_KEYCLOAK_PUBLIC_KEY = \".+\"') }}"
+  when:
+    - inventory_hostname in groups['automationhub'] | default([])
+    - groups['sso'] | default([]) | length

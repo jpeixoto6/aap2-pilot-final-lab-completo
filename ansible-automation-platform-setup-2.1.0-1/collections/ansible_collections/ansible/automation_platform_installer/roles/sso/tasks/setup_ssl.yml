@@ -1,0 +1,112 @@
+---
+- set_fact:
+    sso_keystore_file: '{{ sso_home_dir }}/standalone/configuration/{{ sso_keystore_name }}.jks'
+
+- name: Copy user provided keystore file to SSO configuration directory
+  copy:
+    src: '{{ sso_custom_keystore_file }}'
+    dest: '{{ sso_keystore_file }}'
+  when:
+    - sso_use_https | bool
+    - sso_custom_keystore_file is defined
+
+- block:
+    - name: Check if keystore exists
+      stat:
+        path: '{{ sso_keystore_file }}'
+      register: keystore_file_exists
+
+    - name: Check if alias already exists in keystore
+      command: keytool -list -alias '{{ sso_keystore_name }}' -keystore '{{ sso_keystore_file }}' -storepass '${KEYSTORE_PASSWD}'
+      ignore_errors: true
+      register: keypair_alias_exists
+      when: keystore_file_exists.stat.exists
+
+    - name: Ensure keystore lookup was successful
+      fail:
+        msg: "Failed to lookup keystore for alias '{{ sso_keystore_name }}': {{ keypair_alias_exists.stdout }}. If changing keystore password, delete {{ sso_keystore_file }}."
+      when:
+        - keystore_file_exists.stat.exists
+        - keypair_alias_exists.failed
+        - not keypair_alias_exists.stdout is search("Alias <" + sso_keystore_name + "> does not exist")
+
+    - name: Delete alias if already exists
+      command: keytool -delete -alias '{{ sso_keystore_name }}' -keystore '{{ sso_keystore_file }}' -storepass '${KEYSTORE_PASSWD}'
+      when:
+        - keystore_file_exists.stat.exists
+        - not keypair_alias_exists.failed
+
+    - name: Generate a key pair
+      command: keytool -genkeypair -alias '{{ sso_keystore_name }}' -keyalg RSA -keystore '{{ sso_keystore_file }}' --storetype pkcs12 \
+                       -validity 824 -dname 'CN={{ sso_host }}' -storepass '${KEYSTORE_PASSWD}' -keypass '${KEYSTORE_PASSWD}' \
+                       -ext "extendedKeyUsage=serverAuth" -ext "SAN=DNS:{{ sso_host }}"
+  environment:
+    KEYSTORE_PASSWD: "{{ sso_keystore_password }}"
+  when:
+    - sso_use_https | bool
+    - sso_custom_keystore_file is not defined
+
+- name: Add security-realm element
+  command: ./jboss-cli.sh  -c --commands="/core-service=management/security-realm=UndertowRealm:add()"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  ignore_errors: true
+  register: add_security_realm
+  when: sso_use_https | bool
+
+- name: Check if security-realm element was created successfully
+  fail:
+    msg: "Failed to create security-realm element: {{ add_security_realm.stdout }}"
+  when:
+    - sso_use_https | bool
+    - add_security_realm.failed
+    - not add_security_realm.stdout is search("WFLYCTL0212") # WFLYCTL0212: Duplicate resource
+
+- name: Check if server-identity element already exists
+  command: ./jboss-cli.sh  -c --commands="/core-service=management/security-realm=UndertowRealm/server-identity=ssl:read-resource"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  ignore_errors: true
+  no_log: true
+  register: server_identity_exists
+
+- name: Delete server-identity element if already exists
+  command: ./jboss-cli.sh  -c --commands="/core-service=management/security-realm=UndertowRealm/server-identity=ssl:remove"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  when: not server_identity_exists.failed
+
+- name: Add server-identify resource
+  command:
+    argv:
+      - ./jboss-cli.sh
+      - -c
+      - --commands=/core-service=management/security-realm=UndertowRealm/server-identity=ssl:add(keystore-path="{{ sso_keystore_name }}.jks", keystore-relative-to=jboss.server.config.dir, keystore-password="{{ sso_keystore_password | regex_replace('"', '\"') }}")
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  no_log: true
+  when: sso_use_https | bool
+
+- name: Set https-listener to UndertowRealm
+  command: ./jboss-cli.sh  -c --commands="/subsystem=undertow/server=default-server/https-listener=https:write-attribute(name=security-realm, value=UndertowRealm)"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  when: sso_use_https | bool
+
+- name: Set https-listener to ApplicationRealm
+  command: ./jboss-cli.sh  -c --commands="/subsystem=undertow/server=default-server/https-listener=https:write-attribute(name=security-realm, value=ApplicationRealm)"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  when: not sso_use_https | bool
+
+- name: Check if SSO server needs to be reloaded
+  command: ./jboss-cli.sh -c --commands=":read-attribute(name=server-state)"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  register: sso_server_needs_reload
+
+- name: Reload SSO server
+  command: ./jboss-cli.sh -c --commands=":reload"
+  args:
+    chdir: '{{ sso_home_dir }}/bin'
+  when: sso_server_needs_reload.stdout is search("reload-required")

@@ -1,0 +1,93 @@
+---
+- name: Copy custom SSL Certificate Authority files
+  become: yes
+  become_user: receptor
+  copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: 0640
+    owner: receptor
+    group: receptor
+  with_items:
+    - { src: '{{ mesh_ca_certfile }}', dest: '{{ receptor_ca_mesh_certfile }}' }
+    - { src: '{{ mesh_ca_keyfile }}', dest: '{{ receptor_ca_mesh_keyfile }}' }
+  when:
+    - mesh_ca_certfile | default('') | length
+    - mesh_ca_keyfile | default('') | length
+
+- name: Verify if Receptor Mesh CA exists
+  stat:
+    path: "{{ item }}"
+  register: receptor_ca_exists
+  failed_when: not receptor_ca_exists.stat.exists
+  ignore_errors: yes
+  with_items:
+    - "{{ receptor_ca_mesh_certfile }}"
+    - "{{ receptor_ca_mesh_keyfile }}"
+  
+- name: Create Receptor Mesh CA
+  become: yes
+  become_user: receptor
+  shell: >
+    receptor --cert-init commonname="{{ receptor_ca_common_name }}"
+    bits="{{ receptor_tls_bits }}" outcert="{{ receptor_ca_mesh_certfile }}"
+    outkey="{{ receptor_ca_mesh_keyfile }}"
+  when: receptor_ca_exists is failed
+  notify:
+    - "Restart Receptor"
+
+- name: Gather Receptor Mesh CA Metadata
+  community.crypto.x509_certificate_info:
+    path: "{{ receptor_ca_mesh_certfile }}"
+  register: _receptor_ca_mesh_certfile_metadata
+
+- name: Store Receptor Mesh CA Expiry Date as a Fact
+  block:
+  - set_fact:
+      _expiration_from_cert: "{{ _receptor_ca_mesh_certfile_metadata.not_after | to_datetime(format='%Y%m%d%H%M%SZ') }}" #20310920155104Z
+  - set_fact:
+      _epoch: "{{ (_expiration_from_cert | to_datetime).timestamp() }}" #1947700264.0
+  - set_fact:    
+      _epoch_minus_delta: "{{ (_epoch|int)-(86400*receptor_tls_expiration_delta_days) }}"
+  - set_fact:
+      _datetime_with_z: "{{ '%Y-%m-%dT%H:%M:%S%z' | strftime(_epoch_minus_delta) }}" #2031-09-20T15:51:04-0400
+  - set_fact:
+      _cert_expiry_date: "{{ _datetime_with_z[:-2] }}:{{ _datetime_with_z[-2:] }}" #2031-09-20T15:51:04-04:00
+
+- name: Re-check if Receptor Mesh CA files are present
+  stat:
+    path: "{{ item }}"
+  register: receptor_ca_exists
+  failed_when: not receptor_ca_exists.stat.exists
+  ignore_errors: yes
+  with_items:
+    - "{{ receptor_ca_mesh_certfile }}"
+    - "{{ receptor_ca_mesh_keyfile }}"
+
+- name: Assert if any Receptor Mesh CA file is missing
+  assert:
+    quiet: yes
+    that:
+      - item.stat.exists
+    fail_msg: "The file '{{ item.invocation.module_args.path }}' cannot be found"
+  with_items:
+    - "{{ receptor_ca_exists.results }}"
+
+- name: Ensure expected permissions for the Receptor Mesh CA files
+  file:
+    dest: "{{ item }}"
+    owner: receptor
+    group: receptor
+    mode: 0640
+  with_items:
+    - "{{ receptor_ca_mesh_certfile }}"
+    - "{{ receptor_ca_mesh_keyfile }}"
+
+- name: Slurp Receptor Mesh CA files
+  slurp:
+    src: "{{ item }}"
+  register: mesh_ca_data
+  no_log: true
+  with_items:
+    - "{{ receptor_ca_mesh_certfile }}"
+    - "{{ receptor_ca_mesh_keyfile }}"
