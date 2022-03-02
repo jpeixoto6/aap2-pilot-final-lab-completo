@@ -3,3 +3,9 @@ dependencies:
   galaxy: requirements.yml
   python: requirements.txt
   system: bindep.txt
+
+additional_build_steps:
+  prepend: |
+    COPY clouds.yaml /etc/openstack/clouds.yaml
+    COPY 5593key.pem /home/runner/.ssh/5593key.pem
+

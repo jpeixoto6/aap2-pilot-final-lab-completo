@@ -1,0 +1,12 @@
+clouds:
+  5593-project:
+    auth:
+      auth_url: "https://api.orange.sc01.infra.opentlc.com:13000//v3"
+      username: "5593-user"
+      project_name: "5593-project"
+      project_id: "067619ba1fd44ba49fdd8da9a58eabe3"
+      user_domain_name: "Default"
+      password: "QM9I2KQnOQvQ"
+    region_name: "regionOne"
+    interface: "public"
+    identity_api_version: 3

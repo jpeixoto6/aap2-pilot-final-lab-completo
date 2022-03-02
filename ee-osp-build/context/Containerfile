@@ -22,6 +22,8 @@ RUN assemble
 
 FROM $EE_BASE_IMAGE
 USER root
+COPY clouds.yaml /etc/openstack/clouds.yaml
+COPY 5593key.pem /home/runner/.ssh/5593key.pem
 
 COPY --from=galaxy /usr/share/ansible /usr/share/ansible
 
