@@ -1,0 +1,83 @@
+---
+- name: Get bastion ip address to set dns_server
+  hosts: bastion
+  gather_facts: no
+  become: true
+
+  tasks:
+
+    - name: Gather network facts
+      setup:
+        gather_subset:
+          - 'network'
+
+    - name: "Set variables"
+      set_fact:
+        dns_server: "{{ ansible_default_ipv4.address}}"
+
+- name: Create OpenStack Instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    guid: "{{ lookup('env','GUID') }}"
+  tasks:
+    - name: Include Instance variables
+      include_vars: instances_vars.yml
+
+    - name: Create Instance
+      openstack.cloud.server:
+        cloud: "{{ guid }}-project"
+        name: "{{ item.name }}"
+        image: "{{ item.image }}"
+        key_name: "{{ item.keypair }}"
+        flavor: "{{ item.flavor }}"
+        security_groups: "{{ item.security_group }}"
+        auto_ip: no
+        wait: no
+        nics:
+          - net-name: "{{ item.internal_network }}"
+        meta:
+          AnsibleGroup: "{{ item.metadata.AnsibleGroup }}"
+          type: "{{ item.metadata.type }}"
+        userdata: |
+          #!/bin/bash
+          echo 'PEERDNS=no' |sudo  tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 >/dev/null
+          echo 'DNS1={{hostvars.bastion.dns_server}}' |sudo  tee -a /etc/sysconfig/network-scripts/ifcfg-eth0 >/dev/null
+          sudo systemctl restart NetworkManager
+        state: present
+      register: servers
+      loop: "{{ instances }}"
+      async: 7200
+      poll: 0
+  
+    - name: Wait for instance(s) creation to complete
+      vars:
+        ansible_async_dir: "{{ lookup('env','HOME') }}/.ansible_async/"
+      async_status:
+        jid: "{{ item.ansible_job_id }}"
+      register: os_jobs
+      until: os_jobs.finished
+      retries: 300
+      loop: "{{ servers.results | flatten(levels=1) }}"
+
+    - name: Populate instance inventory
+      add_host:
+        host: "{{ item.openstack.name }}"
+        group: "osp_servers"
+        ansible_host: "{{ item.openstack.private_v4 }}"
+        ansible_user: cloud-user
+        ansible_ssh_private_key_file: "/home/runner/.ssh/{{ guid }}key.pem"
+      loop: "{{ os_jobs.results | flatten(levels=1) }}"
+      when: servers.changed | bool
+
+- name: Check new servers
+  hosts: osp_servers
+  gather_facts: false
+  tasks:
+    - name: wait for host to be available
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+        connect_timeout: 10
+                           

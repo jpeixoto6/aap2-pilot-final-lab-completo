@@ -1,0 +1,39 @@
+---
+instances:
+  - name: app1
+    image: rhel-8.3
+    flavor: GLOBAL-CPU_4_Memory_8192_Disk_30_flavor
+    internal_network: "5593-dev-network"
+    security_group: "5593-HostSG"
+    keypair: "5593-keypair"
+    metadata:
+      AnsibleGroup: backend_servers
+      type: osp_instances 
+  - name: app2
+    image: rhel-8.3
+    flavor: GLOBAL-CPU_4_Memory_8192_Disk_30_flavor
+    internal_network: "5593-dev-network"
+    security_group: "5593-HostSG"
+    keypair: "5593-keypair"
+    metadata:
+      AnsibleGroup: backend_servers
+      type: osp_instances   
+  - name: appdb
+    image: rhel-8.3
+    flavor: GLOBAL-CPU_4_Memory_8192_Disk_30_flavor
+    internal_network: "5593-dev-network"
+    security_group: "5593-HostSG"
+    keypair: "5593-keypair"
+    metadata:
+      AnsibleGroup: database_servers
+      type: osp_instances
+  - name: frontend
+    image: rhel-8.3
+    flavor: GLOBAL-CPU_4_Memory_8192_Disk_30_flavor
+    internal_network: "5593-dev-network"
+    security_group: "5593-HostSG"
+    keypair: "5593-keypair"
+    metadata:
+      AnsibleGroup: loadbalancers
+      type: osp_instances
+  

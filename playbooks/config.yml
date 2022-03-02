@@ -1,0 +1,60 @@
+---
+- name: Play to automate process
+  hosts: osp_instances
+  become: yes
+  vars:
+    satellite_ca_cert_url: http://satellite.example.com/pub/katello-ca-consumer-latest.noarch.rpm
+    satellite_activationkey: gpte-labs-rhel8
+    satellite_org: prod
+  tasks:
+    - name: install katello-ca-consumer package
+      ansible.builtin.dnf:
+        name: "{{ satellite_ca_cert_url }}"
+        state: present
+        disable_gpg_check: true
+
+    - name: register system and attach subs
+      community.general.redhat_subscription:
+        state: present
+        activationkey: "{{ satellite_activationkey }}"
+        org_id: "{{ satellite_org }}"
+
+- name: Deploy database
+  hosts: database_servers
+  become: yes
+  roles:
+    - name: Install and configure firewall
+      role: mycollections.threetierapp.firewall
+      vars:
+        firewall_services:
+          - mysql   
+    - name: database deployment
+      role: mycollections.threetierapp.mysqldb
+
+- name: Deploy haproxy
+  hosts: loadbalancers
+  become: yes
+  roles:
+    - name: Install and configure firewall
+      role: mycollections.threetierapp.firewall
+      vars:
+        firewall_services:
+          - http
+        firewall_tcp_ports:
+          - 5000
+    - name: frontend deployment
+      role: mycollections.threetierapp.haproxy
+
+- name: Deploy apache
+  hosts: backend_servers
+  become: yes
+  roles:
+    - name: Install and configure firewall
+      role: mycollections.threetierapp.firewall
+      vars:
+        firewall_services:
+          - http
+        firewall_tcp_ports:
+          - 8080
+    - name: application deployment
+      role: mycollections.threetierapp.apache

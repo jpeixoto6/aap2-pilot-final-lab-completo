@@ -1,0 +1,21 @@
+---
+- name: Destroy OpenStack Instances
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    guid: "{{ lookup('env','GUID') }}"
+  tasks:
+    - name: Include Instance variables
+      include_vars: instances_vars.yml
+
+    - name: Delete Instance
+      openstack.cloud.server:
+        cloud: "{{ guid }}-project"
+        name: "{{ instance.name }}"
+        delete_fip: yes
+        state: absent
+      loop: "{{ instances }}"
+      loop_control:
+        loop_var: instance
+                           
